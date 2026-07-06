@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { migrate } from './migrations.mjs';
 import { respond, saveMessage, recentMessages } from './chat.mjs';
 import { getStrategy, updateStrategy, updateDomain } from './strategy.mjs';
@@ -64,10 +67,42 @@ app.get('/api/tasks/procrastination', (_req, res) => res.json(procrastinationCan
 app.get('/api/briefing/today', (_req, res) => res.json(getOrCreateTodayBriefing()));
 app.patch('/api/briefing/today', (req, res) => res.json(updateBriefing(req.body || {})));
 
+// ---- Static (built SPA) ----------------------------------------------------
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DIST = path.resolve(__dirname, '..', 'dist');
+const hasDist = fs.existsSync(path.join(DIST, 'index.html'));
+
+if (hasDist) {
+  app.use(express.static(DIST));
+  // SPA fallback for non-/api routes
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(DIST, 'index.html'));
+  });
+} else {
+  // Dev hint if someone hits the API server root without a built bundle
+  app.get('/', (_req, res) => {
+    res.type('html').send(
+      `<!doctype html><meta charset="utf-8"><title>Personal OS – API</title>
+       <body style="font-family:system-ui;max-width:640px;margin:60px auto;color:#222;line-height:1.5">
+         <h1 style="margin:0 0 8px">Personal OS API</h1>
+         <p style="color:#666;margin:0 0 20px">You're hitting the API server, not the web UI.</p>
+         <ul>
+           <li>In dev: open <a href="http://localhost:5173">http://localhost:5173</a> (Vite proxies <code>/api</code> here).</li>
+           <li>For a single-URL prod build: <code>npm run build</code>, then <code>npm start</code> and open <a href="/">this URL</a>.</li>
+           <li>Health check: <a href="/api/health">/api/health</a></li>
+         </ul>
+       </body>`
+    );
+  });
+}
+
 // ---- Fallback --------------------------------------------------------------
 app.use((_req, res) => res.status(404).json({ error: 'not found' }));
 
 const PORT = process.env.PORT || 5185;
 app.listen(PORT, () => {
   console.log(`[pos] server listening on http://localhost:${PORT}`);
+  console.log(hasDist
+    ? `[pos] serving built UI from ${DIST}`
+    : `[pos] dev mode — open http://localhost:5173 for the web UI (run "npm run dev")`);
 });
