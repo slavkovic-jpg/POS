@@ -53,4 +53,12 @@ export const api = {
     accept: (hypotheses) => req('/onboarding/accept', { method: 'POST', body: { hypotheses } }),
     complete: () => req('/onboarding/complete', { method: 'POST' }),
   },
+  reviews: {
+    list: (kind) => req('/reviews' + (kind ? `?kind=${kind}` : '')),
+    get: (id) => req(`/reviews/${id}`),
+    start: (kind = 'weekly') => req('/reviews', { method: 'POST', body: { kind } }),
+    update: (id, patch) => req(`/reviews/${id}`, { method: 'PATCH', body: patch }),
+    generate: (id) => req(`/reviews/${id}/generate`, { method: 'POST' }),
+    activity: (id) => req(`/reviews/${id}/activity`),
+  },
 };

@@ -12,6 +12,7 @@ import { listDecisions, addDecision, reviewDecision } from './decisions.mjs';
 import { listTasks, addTask, updateTask, procrastinationCandidates } from './tasks.mjs';
 import { getOrCreateTodayBriefing, updateBriefing } from './briefing.mjs';
 import { getProfile, updateProfile, completeOnboarding, analyzeCv, acceptHypotheses } from './onboarding.mjs';
+import { listReviews, getReview, startReview, updateReview, generateReview, gatherActivity } from './review.mjs';
 
 migrate();
 
@@ -96,6 +97,35 @@ app.post('/api/onboarding/accept', (req, res) => {
   res.json({ saved: acceptHypotheses(hypotheses) });
 });
 app.post('/api/onboarding/complete', (_req, res) => res.json(completeOnboarding()));
+
+// ---- Reviews ---------------------------------------------------------------
+app.get('/api/reviews', (req, res) => res.json(listReviews(req.query.kind)));
+app.get('/api/reviews/:id', (req, res) => {
+  const r = getReview(+req.params.id);
+  if (!r) return res.status(404).json({ error: 'not found' });
+  res.json(r);
+});
+app.post('/api/reviews', (req, res) => {
+  try {
+    res.json(startReview(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.patch('/api/reviews/:id', (req, res) => res.json(updateReview(+req.params.id, req.body || {})));
+app.post('/api/reviews/:id/generate', async (req, res) => {
+  try {
+    const result = await generateReview(+req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.get('/api/reviews/:id/activity', (req, res) => {
+  const r = getReview(+req.params.id);
+  if (!r) return res.status(404).json({ error: 'not found' });
+  res.json(gatherActivity(r.period_start, r.period_end));
+});
 
 // ---- Static (built SPA) ----------------------------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

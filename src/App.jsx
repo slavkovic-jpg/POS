@@ -7,6 +7,7 @@ import KnowledgePage from './pages/KnowledgePage.jsx';
 import DecisionsPage from './pages/DecisionsPage.jsx';
 import OpenQuestionsPage from './pages/OpenQuestionsPage.jsx';
 import OnboardingPage from './pages/OnboardingPage.jsx';
+import ReviewsPage from './pages/ReviewsPage.jsx';
 
 const NAV = [
   { to: '/chat', label: 'Chat' },
@@ -15,6 +16,7 @@ const NAV = [
   { to: '/knowledge', label: 'Knowledge' },
   { to: '/questions', label: 'Open Questions' },
   { to: '/decisions', label: 'Decisions' },
+  { to: '/reviews', label: 'Reviews' },
   { to: '/onboarding', label: 'Onboarding' },
 ];
 
@@ -46,6 +48,7 @@ export default function App() {
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/questions" element={<OpenQuestionsPage />} />
           <Route path="/decisions" element={<DecisionsPage />} />
+          <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
         </Routes>
       </main>
