@@ -9,7 +9,7 @@ AI Chief of Staff, strategic advisor, decision engine, and life management platf
 - Node.js + Express (API)
 - SQLite via built-in `node:sqlite` (storage — zero native deps)
 - React + Vite (web UI)
-- Anthropic SDK (`@anthropic-ai/sdk`) — defaults to `claude-opus-4-8` with adaptive thinking. Falls back to a built-in stub responder when no API key is set.
+- Conversation backend, in priority order: **Claude API** (`claude-opus-4-8`, adaptive thinking) → **local Ollama** (default `hermes3:latest`) → built-in stub responder. The chat endpoint tries them in that order and returns the first that succeeds.
 
 ## Quick start
 
@@ -22,11 +22,19 @@ npm run dev               # server on :5185, web on :5173
 
 Open http://localhost:5173.
 
-### Enabling the Claude-backed conversation
+### Enabling the conversation
 
-Set `ANTHROPIC_API_KEY` in `.env` (or in your shell). Model defaults to `claude-opus-4-8` with adaptive thinking; override with `POS_MODEL=…`. On every turn the server assembles a system prompt from your strategy scaffold, personal knowledge model, and open questions, then sends the last 20 messages of history — so the model sees who you are, what you've decided, and what's still unresolved.
+Every turn assembles a system prompt from your strategy scaffold, personal knowledge model, and open questions, then sends the last 20 messages of history — so whichever backend answers, it sees who you are, what you've decided, and what's still unresolved.
 
-Without a key, the server uses the built-in stub responder. Nothing breaks; you just get scripted heuristics instead of the model.
+**Claude (preferred)** — set `ANTHROPIC_API_KEY` in `.env`. Model defaults to `claude-opus-4-8`; override with `POS_MODEL=…`.
+
+**Ollama (fallback while you don't have a key, or when the API is unreachable)** — install Ollama and pull any chat-capable model:
+```
+ollama pull hermes3        # or llama3.2, qwen2.5, mistral, etc.
+```
+The Ollama desktop app starts the daemon automatically. If you're running headless, `ollama serve`. Default model is `hermes3:latest`; override with `OLLAMA_HOST` / `OLLAMA_MODEL`, or disable with `OLLAMA_ENABLED=false`.
+
+**Stub** — always available. Scripted heuristics; no LLM calls. Runs when both above are unavailable.
 
 ## Layout
 
