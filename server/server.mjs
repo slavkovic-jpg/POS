@@ -22,13 +22,23 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // ---- Chat ------------------------------------------------------------------
 app.get('/api/chat/messages', (_req, res) => res.json(recentMessages(100)));
-app.post('/api/chat/send', (req, res) => {
+app.post('/api/chat/send', async (req, res) => {
   const { text } = req.body || {};
   if (!text?.trim()) return res.status(400).json({ error: 'text required' });
-  saveMessage('user', text);
-  const reply = respond(text);
-  const stored = saveMessage('assistant', reply.text, { intent: reply.intent });
-  res.json({ user_text: text, assistant: stored, intent: reply.intent });
+  try {
+    saveMessage('user', text);
+    const reply = await respond(text);
+    const meta = { intent: reply.intent };
+    if (reply.model) meta.model = reply.model;
+    if (reply.usage) meta.usage = reply.usage;
+    if (reply.stop_reason) meta.stop_reason = reply.stop_reason;
+    if (reply.error) meta.error = reply.error;
+    const stored = saveMessage('assistant', reply.text, meta);
+    res.json({ user_text: text, assistant: stored, intent: reply.intent });
+  } catch (err) {
+    console.error('[chat] send failed:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---- Strategy --------------------------------------------------------------

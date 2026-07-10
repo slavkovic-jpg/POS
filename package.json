@@ -6,14 +6,15 @@
   "description": "Personal Operating System — AI Chief of Staff, strategic advisor, and life management platform.",
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "node --watch server/server.mjs",
+    "dev:server": "node --watch --env-file-if-exists=.env server/server.mjs",
     "dev:web": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node server/server.mjs",
-    "migrate": "node server/migrations.mjs"
+    "start": "node --env-file-if-exists=.env server/server.mjs",
+    "migrate": "node --env-file-if-exists=.env server/migrations.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
     "cors": "^2.8.5",
     "express": "^4.21.1",
     "react": "^18.3.1",

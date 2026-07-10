@@ -1,13 +1,21 @@
 import { db, now } from './db.mjs';
+import { buildSystemPrompt } from './context.mjs';
 
-/**
- * Stub responder. Later this becomes an Anthropic API call with the
- * user's memory + strategy scaffold injected as system context.
- * Keep the interface stable so the swap is a one-line change.
- */
-export function respond(userText) {
+const MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
+const HISTORY_TURNS = 20;
+
+let anthropicClient = null;
+async function getClient() {
+  if (anthropicClient) return anthropicClient;
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  anthropicClient = new Anthropic();
+  return anthropicClient;
+}
+
+// ---- Stub responder (fallback when no API key is set) ---------------------
+function respondStub(userText) {
   const lower = userText.toLowerCase().trim();
-
   if (/^(hi|hello|hey|good\s*(morning|afternoon|evening))/.test(lower)) {
     return {
       text:
@@ -43,7 +51,6 @@ export function respond(userText) {
       intent: 'strategy_change_probe',
     };
   }
-
   return {
     text:
       "Got it — I've captured that. To make it useful later, one clarifying question: " +
@@ -52,6 +59,55 @@ export function respond(userText) {
   };
 }
 
+// ---- Claude-backed responder ----------------------------------------------
+async function respondClaude(userText) {
+  const client = await getClient();
+  if (!client) return null;
+
+  const history = db.prepare(
+    `SELECT role, content FROM chat_messages
+     WHERE role IN ('user', 'assistant')
+     ORDER BY id DESC LIMIT ?`
+  ).all(HISTORY_TURNS).reverse();
+
+  const messages = history.map((m) => ({ role: m.role, content: m.content }));
+  messages.push({ role: 'user', content: userText });
+
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 2048,
+    thinking: { type: 'adaptive' },
+    system: buildSystemPrompt(),
+    messages,
+  });
+
+  const text = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+
+  return {
+    text: text || '(no response)',
+    intent: 'claude',
+    model: response.model,
+    usage: response.usage,
+    stop_reason: response.stop_reason,
+  };
+}
+
+export async function respond(userText) {
+  try {
+    const claude = await respondClaude(userText);
+    if (claude) return claude;
+  } catch (err) {
+    console.error('[chat] Claude call failed, falling back to stub:', err.message);
+    return { ...respondStub(userText), intent: 'stub_after_error', error: err.message };
+  }
+  return respondStub(userText);
+}
+
+// ---- Persistence -----------------------------------------------------------
 export function saveMessage(role, content, meta = null) {
   const info = db.prepare(
     'INSERT INTO chat_messages (role, content, meta, created_at) VALUES (?, ?, ?, ?)'

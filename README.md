@@ -7,19 +7,26 @@ AI Chief of Staff, strategic advisor, decision engine, and life management platf
 ## Stack
 
 - Node.js + Express (API)
-- SQLite via `better-sqlite3` (storage)
+- SQLite via built-in `node:sqlite` (storage — zero native deps)
 - React + Vite (web UI)
-- LLM: **stubbed** in v0 — swap in Anthropic SDK later
+- Anthropic SDK (`@anthropic-ai/sdk`) — defaults to `claude-opus-4-8` with adaptive thinking. Falls back to a built-in stub responder when no API key is set.
 
 ## Quick start
 
 ```bash
 npm install
-npm run migrate    # creates ./data/pos.db
-npm run dev        # server on :5185, web on :5173
+cp .env.example .env      # then paste your ANTHROPIC_API_KEY (optional — stub runs without it)
+npm run migrate           # creates ./data/pos.db
+npm run dev               # server on :5185, web on :5173
 ```
 
 Open http://localhost:5173.
+
+### Enabling the Claude-backed conversation
+
+Set `ANTHROPIC_API_KEY` in `.env` (or in your shell). Model defaults to `claude-opus-4-8` with adaptive thinking; override with `POS_MODEL=…`. On every turn the server assembles a system prompt from your strategy scaffold, personal knowledge model, and open questions, then sends the last 20 messages of history — so the model sees who you are, what you've decided, and what's still unresolved.
+
+Without a key, the server uses the built-in stub responder. Nothing breaks; you just get scripted heuristics instead of the model.
 
 ## Layout
 
