@@ -46,4 +46,11 @@ export const api = {
     today: () => req('/briefing/today'),
     update: (patch) => req('/briefing/today', { method: 'PATCH', body: patch }),
   },
+  onboarding: {
+    profile: () => req('/onboarding/profile'),
+    updateProfile: (patch) => req('/onboarding/profile', { method: 'PATCH', body: patch }),
+    analyze: (cv_text) => req('/onboarding/analyze', { method: 'POST', body: { cv_text } }),
+    accept: (hypotheses) => req('/onboarding/accept', { method: 'POST', body: { hypotheses } }),
+    complete: () => req('/onboarding/complete', { method: 'POST' }),
+  },
 };

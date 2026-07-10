@@ -11,6 +11,7 @@ import { listOpenQuestions, addOpenQuestion, updateOpenQuestion, resolveOpenQues
 import { listDecisions, addDecision, reviewDecision } from './decisions.mjs';
 import { listTasks, addTask, updateTask, procrastinationCandidates } from './tasks.mjs';
 import { getOrCreateTodayBriefing, updateBriefing } from './briefing.mjs';
+import { getProfile, updateProfile, completeOnboarding, analyzeCv, acceptHypotheses } from './onboarding.mjs';
 
 migrate();
 
@@ -76,6 +77,25 @@ app.get('/api/tasks/procrastination', (_req, res) => res.json(procrastinationCan
 // ---- Briefing --------------------------------------------------------------
 app.get('/api/briefing/today', (_req, res) => res.json(getOrCreateTodayBriefing()));
 app.patch('/api/briefing/today', (req, res) => res.json(updateBriefing(req.body || {})));
+
+// ---- Onboarding ------------------------------------------------------------
+app.get('/api/onboarding/profile', (_req, res) => res.json(getProfile()));
+app.patch('/api/onboarding/profile', (req, res) => res.json(updateProfile(req.body || {})));
+app.post('/api/onboarding/analyze', async (req, res) => {
+  try {
+    const { cv_text } = req.body || {};
+    const result = await analyzeCv(cv_text);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/onboarding/accept', (req, res) => {
+  const { hypotheses } = req.body || {};
+  if (!Array.isArray(hypotheses)) return res.status(400).json({ error: 'hypotheses array required' });
+  res.json({ saved: acceptHypotheses(hypotheses) });
+});
+app.post('/api/onboarding/complete', (_req, res) => res.json(completeOnboarding()));
 
 // ---- Static (built SPA) ----------------------------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
