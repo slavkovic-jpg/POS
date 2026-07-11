@@ -13,6 +13,7 @@ import { listTasks, addTask, updateTask, procrastinationCandidates } from './tas
 import { getOrCreateTodayBriefing, updateBriefing } from './briefing.mjs';
 import { getProfile, updateProfile, completeOnboarding, analyzeCv, acceptHypotheses } from './onboarding.mjs';
 import { listReviews, getReview, startReview, updateReview, generateReview, gatherActivity } from './review.mjs';
+import { captureFromConversation } from './capture.mjs';
 
 migrate();
 
@@ -24,6 +25,15 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // ---- Chat ------------------------------------------------------------------
 app.get('/api/chat/messages', (_req, res) => res.json(recentMessages(100)));
+app.post('/api/chat/capture', async (req, res) => {
+  try {
+    const limit = Math.max(2, Math.min(50, Number(req.body?.limit) || 20));
+    const result = await captureFromConversation({ limit });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.post('/api/chat/send', async (req, res) => {
   const { text } = req.body || {};
   if (!text?.trim()) return res.status(400).json({ error: 'text required' });

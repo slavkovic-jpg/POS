@@ -14,6 +14,7 @@ export const api = {
   chat: {
     messages: () => req('/chat/messages'),
     send: (text) => req('/chat/send', { method: 'POST', body: { text } }),
+    capture: (limit = 20) => req('/chat/capture', { method: 'POST', body: { limit } }),
   },
   strategy: {
     get: () => req('/strategy'),

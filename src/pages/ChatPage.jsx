@@ -1,11 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import CaptureModal from '../components/CaptureModal.jsx';
 
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [toast, setToast] = useState(null);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   useEffect(() => { api.chat.messages().then(setMessages).catch(console.error); }, []);
   useEffect(() => {
@@ -68,8 +77,20 @@ export default function ChatPage() {
           onKeyDown={onKey}
           placeholder="What's on your mind? (Enter to send · Shift+Enter for newline)"
         />
-        <button onClick={send} disabled={sending || !text.trim()}>Send</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <button onClick={send} disabled={sending || !text.trim()}>Send</button>
+          <button className="ghost" onClick={() => setCaptureOpen(true)} disabled={messages.length === 0}>
+            Capture
+          </button>
+        </div>
       </div>
+
+      <CaptureModal
+        open={captureOpen}
+        onClose={() => setCaptureOpen(false)}
+        onSaved={(n) => setToast(`Saved ${n} item${n === 1 ? '' : 's'}.`)}
+      />
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
