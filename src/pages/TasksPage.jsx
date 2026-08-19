@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  ListTodo, Sparkles, Target, Zap, Timer, Layers, Globe, Check,
+  Clock, AlertTriangle, ChevronDown, ChevronUp, Trash2, ExternalLink,
+  Inbox, Compass,
+} from 'lucide-react';
 import { api } from '../lib/api.js';
+import { ENERGY_META, domainMeta } from '../lib/domains.js';
+import { DomainBadge, HueScope, Stat, SectionHead, Callout } from '../components/ui.jsx';
 import FocusTimer from '../components/FocusTimer.jsx';
 import UnpackModal from '../components/UnpackModal.jsx';
 
@@ -29,6 +37,8 @@ export default function TasksPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  const [config, setConfig] = useState(null);
+
   async function refresh() {
     const [t, c, s] = await Promise.all([
       api.tasks.list(showDone ? { all: 'true' } : {}),
@@ -42,6 +52,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     api.strategy.get().then((s) => setDomains(s.domains)).catch(console.error);
+    api.config().then(setConfig).catch(console.error);
   }, []);
   useEffect(() => { refresh().catch(console.error); }, [showDone]);
 
@@ -71,16 +82,18 @@ export default function TasksPage() {
   return (
     <div>
       <div className="page-header">
-        <h1>Tasks</h1>
+        <h1><ListTodo size={22} style={{ color: 'var(--accent)' }} />Tasks</h1>
         <p>
-          Scored, not just listed. What surfaces depends on the energy you actually have and the
-          time you actually have — not on what would be ideal.
+          Scored, not just listed. What surfaces depends on the energy and time you actually have —
+          set those on the <Link to="/dashboard">dashboard</Link> or below. Each task carries three
+          actions for the three reasons work stalls: you can't start it, it's too big, or you don't
+          know enough yet.
         </p>
       </div>
 
       {/* Brain dump */}
       <div className="panel">
-        <h2>Brain dump</h2>
+        <h2><Inbox size={15} />Brain dump</h2>
         <p style={{ color: 'var(--text-dim)', margin: '0 0 10px' }}>
           Write it messy. One dump can contain several tasks — they get pulled apart, scored, and
           shown to you for approval before anything is saved.
@@ -92,25 +105,28 @@ export default function TasksPage() {
           placeholder="Stressed about the Q3 deck, back is tight again, need to reply to the London email, should really book the dentist…"
         />
         <div className="row-flex" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
-          <button onClick={() => setUnpackOpen(true)} disabled={!dump.trim()}>Unpack</button>
+          <button onClick={() => setUnpackOpen(true)} disabled={!dump.trim()}><Sparkles size={13} />Unpack</button>
         </div>
       </div>
 
       {/* Current conditions */}
       <div className="panel">
-        <h2>Current conditions</h2>
+        <h2><Zap size={15} />Current conditions</h2>
         <label>Energy right now</label>
         <div className="segmented">
-          {energyStates.map(([key, val]) => (
-            <button
-              key={key}
-              className={'seg' + (ctx.energy_state === key ? ' active' : '')}
-              onClick={() => patchContext({ energy_state: key })}
-              title={val.description}
-            >
-              {val.label}
-            </button>
-          ))}
+          {energyStates.map(([key, val]) => {
+            const meta = ENERGY_META[key] || {};
+            return (
+              <button
+                key={key}
+                className={`seg hue-${meta.hue}` + (ctx.energy_state === key ? ' active hue-tinted' : '')}
+                onClick={() => patchContext({ energy_state: key })}
+                title={val.description}
+              >
+                {meta.short || val.label}
+              </button>
+            );
+          })}
         </div>
 
         <label style={{ marginTop: 14 }}>Time available</label>
@@ -134,7 +150,7 @@ export default function TasksPage() {
       {/* Decision engine */}
       <div className="panel" style={{ borderColor: rec ? 'var(--accent)' : 'var(--border)' }}>
         <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-          <h2 style={{ margin: 0 }}>What should I do now?</h2>
+          <h2 style={{ margin: 0 }}><Target size={15} />What should I do now?</h2>
           <button onClick={recommend} disabled={recLoading}>
             {recLoading ? 'Deciding… (1–3 min on Ollama)' : rec ? 'Re-evaluate' : 'Decide'}
           </button>
@@ -209,10 +225,14 @@ export default function TasksPage() {
           </h2>
           <div className="row-flex" style={{ flexWrap: 'wrap', gap: 6 }}>
             <button className={'pill' + (filter === '' ? ' active' : '')} onClick={() => setFilter('')}>All</button>
-            {domains.map((d) => (
-              <button key={d.key} className={'pill' + (filter === d.key ? ' active' : '')}
-                onClick={() => setFilter(d.key)}>{d.name}</button>
-            ))}
+            {domains.map((d) => {
+              const meta = domainMeta(d.key);
+              return (
+                <button key={d.key}
+                  className={`pill hue-${meta.hue}` + (filter === d.key ? ' active hue-tinted' : '')}
+                  onClick={() => setFilter(d.key)}>{meta.label}</button>
+              );
+            })}
             <button className={'pill' + (showDone ? ' active' : '')} onClick={() => setShowDone((v) => !v)}>
               {showDone ? 'Hiding none' : 'Show done'}
             </button>
@@ -230,6 +250,7 @@ export default function TasksPage() {
                 onChanged={refresh}
                 onTimer={() => setTimerTask(t)}
                 onToast={setToast}
+                groundingAvailable={!!config?.grounding_available}
               />
             ))}
           </div>
@@ -261,34 +282,54 @@ export default function TasksPage() {
 }
 
 // ---- Task card -----------------------------------------------------------
-function TaskCard({ task, onChanged, onTimer, onToast }) {
+/**
+ * The three-action pattern from the Canvas prototype: Timer, Sub-steps, Ground
+ * Web. They map onto the three reasons a task stalls — you can't start, it's
+ * too big, or you don't know enough yet.
+ */
+function TaskCard({ task, onChanged, onTimer, onToast, groundingAvailable }) {
   const [expanded, setExpanded] = useState(false);
-  const [subtasks, setSubtasks] = useState(null);
+  const [detail, setDetail] = useState(null);
   const [breaking, setBreaking] = useState(false);
+  const [grounding, setGrounding] = useState(false);
   const done = task.status === 'done';
 
-  async function loadSubtasks() {
-    const full = await api.tasks.get(task.id);
-    setSubtasks(full.subtasks || []);
+  const subtasks = detail?.subtasks ?? null;
+  const research = detail?.grounding ?? null;
+
+  async function loadDetail() {
+    setDetail(await api.tasks.get(task.id));
   }
 
   async function toggleExpand() {
     const next = !expanded;
     setExpanded(next);
-    if (next && subtasks === null) await loadSubtasks();
+    if (next && detail === null) await loadDetail();
   }
 
   async function breakdown() {
     setBreaking(true);
     try {
       const r = await api.tasks.breakdown(task.id);
-      setSubtasks(r.subtasks);
+      setDetail((d) => ({ ...(d || {}), subtasks: r.subtasks }));
       setExpanded(true);
       onToast?.(`Broke into ${r.subtasks.length} steps.`);
       onChanged();
     } catch (err) {
       onToast?.(`Breakdown failed: ${err.message}`);
     } finally { setBreaking(false); }
+  }
+
+  async function ground() {
+    setGrounding(true);
+    try {
+      const r = await api.tasks.ground(task.id);
+      setDetail((d) => ({ ...(d || {}), grounding: r }));
+      setExpanded(true);
+      onToast?.('Fetched web research.');
+    } catch (err) {
+      onToast?.(err.message);
+    } finally { setGrounding(false); }
   }
 
   async function toggleStatus() {
@@ -309,80 +350,134 @@ function TaskCard({ task, onChanged, onTimer, onToast }) {
   }
 
   return (
-    <div className={'task-card' + (done ? ' done' : '')}>
+    <HueScope domainKey={task.domain_key} className={'task-card' + (done ? ' done' : '')}>
       <div className="row-flex" style={{ alignItems: 'flex-start', gap: 12 }}>
         <input type="checkbox" checked={done} onChange={toggleStatus}
-          style={{ width: 18, height: 18, marginTop: 3, flexShrink: 0 }} />
+          style={{ width: 17, height: 17, marginTop: 3, flexShrink: 0 }} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 500, textDecoration: done ? 'line-through' : 'none' }}>
+          <div style={{ fontWeight: 520, textDecoration: done ? 'line-through' : 'none' }}>
             {task.title}
           </div>
-          <div className="item-meta" style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {task.domain_key && <span className="badge">{task.domain_key}</span>}
-            {task.time_minutes != null && <span>{task.time_minutes}m</span>}
-            {task.strategic_importance != null && <span>· importance {task.strategic_importance}</span>}
-            {task.energy_required != null && <span>· energy {task.energy_required}/5</span>}
-            {task.anxiety_level >= 4 && <span className="badge awaiting">high dread</span>}
+          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            {task.domain_key && <DomainBadge domainKey={task.domain_key} size="sm" />}
+            {task.time_minutes != null && <span className="badge"><Clock size={10} />{task.time_minutes}m</span>}
+            {task.strategic_importance != null && (
+              <span className="badge">importance {task.strategic_importance}</span>
+            )}
+            {task.energy_required != null && (
+              <span className="badge"><Zap size={10} />{task.energy_required}/5</span>
+            )}
+            {task.anxiety_level >= 4 && <span className="badge awaiting"><AlertTriangle size={10} />high dread</span>}
             {task.deferred_count >= 2 && <span className="badge awaiting">deferred {task.deferred_count}×</span>}
-            {task.subtask_total > 0 && <span>· {task.subtask_done}/{task.subtask_total} steps</span>}
+            {task.subtask_total > 0 && (
+              <span className="badge"><Layers size={10} />{task.subtask_done}/{task.subtask_total}</span>
+            )}
+            {task.grounding_json && <span className="badge"><Globe size={10} />researched</span>}
           </div>
-          {task.rationale && (
-            <div className="task-rationale">{task.rationale}</div>
-          )}
+          {task.rationale && <div className="task-rationale">{task.rationale}</div>}
         </div>
 
-        <div className="row-flex" style={{ flexShrink: 0, gap: 6 }}>
-          {!done && <button className="ghost" onClick={onTimer}>Timer</button>}
-          <button className="ghost" onClick={breakdown} disabled={breaking}>
-            {breaking ? '…' : 'Break down'}
+        {/* Timer → Sub-steps → Ground Web */}
+        <div className="row-flex" style={{ flexShrink: 0, gap: 5 }}>
+          {!done && (
+            <button className="ghost sm" onClick={onTimer} title="Start a focus block sized to this task">
+              <Timer size={13} /><span className="btn-label">Timer</span>
+            </button>
+          )}
+          <button className="ghost sm" onClick={breakdown} disabled={breaking}
+            title="Break into steps you can start in under a minute">
+            <Layers size={13} /><span className="btn-label">{breaking ? '…' : 'Sub-steps'}</span>
           </button>
-          <button className="ghost" onClick={toggleExpand}>{expanded ? '▲' : '▼'}</button>
+          <button className="ghost sm" onClick={ground} disabled={grounding || !groundingAvailable}
+            title={groundingAvailable
+              ? 'Search the web for current guidance on this task'
+              : 'Needs Claude or Gemini — a local model has no web access'}>
+            <Globe size={13} /><span className="btn-label">{grounding ? '…' : 'Ground'}</span>
+          </button>
+          <button className="ghost sm" onClick={toggleExpand}>
+            {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
         </div>
       </div>
 
       {expanded && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-          {subtasks === null && <div className="item-meta">Loading steps…</div>}
-          {subtasks?.length === 0 && (
+        <div style={{ marginTop: 13, paddingTop: 13, borderTop: '1px solid var(--border)' }}>
+          {detail === null && <div className="item-meta">Loading…</div>}
+
+          {subtasks?.length === 0 && !research && (
             <div className="item-meta">
-              No steps yet. "Break down" splits this into things you can start in under a minute.
+              Nothing here yet. <strong>Sub-steps</strong> splits this into actions you can start in
+              under a minute; <strong>Ground</strong> searches the web for current guidance.
             </div>
           )}
+
           {subtasks?.length > 0 && (
-            <ul className="item-list" style={{ marginBottom: 8 }}>
-              {subtasks.map((s) => (
-                <li key={s.id} style={{ padding: '6px 0', borderBottom: 'none' }}>
-                  <label className="row-flex" style={{ gap: 10, cursor: 'pointer', alignItems: 'flex-start' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!s.done}
-                      onChange={async () => {
-                        await api.tasks.toggleSubtask(s.id);
-                        await loadSubtasks();
-                        onChanged();
-                      }}
-                      style={{ width: 16, height: 16, marginTop: 2 }}
-                    />
-                    <span style={{
-                      textDecoration: s.done ? 'line-through' : 'none',
-                      color: s.done ? 'var(--text-faint)' : 'var(--text)',
-                      fontSize: 13,
-                    }}>
-                      {s.text} <span className="item-meta">({s.est_minutes}m)</span>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
+            <>
+              <h3 style={{ marginTop: 0 }}><Layers size={11} style={{ verticalAlign: -1 }} /> Sub-steps</h3>
+              <ul className="item-list" style={{ marginBottom: 12 }}>
+                {subtasks.map((s) => (
+                  <li key={s.id} style={{ padding: '5px 0', borderBottom: 'none' }}>
+                    <label className="row-flex" style={{ gap: 10, cursor: 'pointer', alignItems: 'flex-start' }}>
+                      <input type="checkbox" checked={!!s.done}
+                        onChange={async () => {
+                          await api.tasks.toggleSubtask(s.id);
+                          await loadDetail();
+                          onChanged();
+                        }}
+                        style={{ width: 15, height: 15, marginTop: 2, flexShrink: 0 }} />
+                      <span style={{
+                        textDecoration: s.done ? 'line-through' : 'none',
+                        color: s.done ? 'var(--text-faint)' : 'var(--text)',
+                        fontSize: 13,
+                      }}>
+                        {s.text} <span className="item-meta">({s.est_minutes}m)</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
+
+          {research && (
+            <div style={{
+              background: 'var(--bg-panel)', border: '1px solid rgba(52,211,153,0.28)',
+              borderRadius: 'var(--radius-sm)', padding: 13, marginBottom: 12,
+            }}>
+              <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 7 }}>
+                <span style={{
+                  fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.09em',
+                  fontWeight: 650, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <Globe size={12} />Web research
+                </span>
+                <span className="item-meta">{research.source} · {research.fetched_at?.slice(0, 10)}</span>
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-dim)' }}>{research.summary}</div>
+              {research.sources?.length > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 9, borderTop: '1px solid var(--border)' }}>
+                  <div className="item-meta" style={{ marginBottom: 6 }}>Sources</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {research.sources.map((s, i) => (
+                      <a key={i} href={s.url} target="_blank" rel="noreferrer" className="badge exploring"
+                        style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.title}<ExternalLink size={9} />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="row-flex" style={{ gap: 6 }}>
-            {!done && <button className="ghost" onClick={defer}>Defer</button>}
-            <button className="ghost danger-text" onClick={remove}>Delete</button>
+            {!done && <button className="ghost sm" onClick={defer}>Defer</button>}
+            <button className="ghost sm danger-text" onClick={remove}><Trash2 size={12} />Delete</button>
           </div>
         </div>
       )}
-    </div>
+    </HueScope>
   );
 }
 
@@ -393,7 +488,7 @@ function CognitiveLoad({ stats }) {
 
   return (
     <div className="panel">
-      <h2>Cognitive load</h2>
+      <h2><Compass size={15} />Cognitive load</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginBottom: 20 }}>
         <Metric label="Open" value={totals.open_count} />
         <Metric label="Committed time" value={`${Math.round(totals.open_minutes / 60 * 10) / 10}h`} />
@@ -404,15 +499,15 @@ function CognitiveLoad({ stats }) {
       <h3>Open time by life domain</h3>
       <div style={{ display: 'grid', gap: 8 }}>
         {by_domain.map((d) => (
-          <div key={d.key}>
-            <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ fontSize: 13 }}>{d.name}</span>
+          <HueScope key={d.key} domainKey={d.key}>
+            <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 3 }}>
+              <DomainBadge domainKey={d.key} size="sm" />
               <span className="item-meta">{d.open_count} open · {d.open_minutes}m</span>
             </div>
             <div className="confidence-bar-track">
-              <div className="confidence-bar-fill" style={{ width: `${(d.open_minutes / maxMinutes) * 100}%` }} />
+              <div className="confidence-bar-fill domain" style={{ width: `${(d.open_minutes / maxMinutes) * 100}%` }} />
             </div>
-          </div>
+          </HueScope>
         ))}
       </div>
       <div className="item-meta" style={{ marginTop: 12 }}>

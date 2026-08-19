@@ -12,6 +12,8 @@ async function req(path, opts = {}) {
 
 export const api = {
   config: () => req('/config'),
+  testBackends: () => req('/config/test'),
+  dashboard: () => req('/dashboard'),
   chat: {
     messages: () => req('/chat/messages'),
     send: (text, opts = {}) => req('/chat/send', { method: 'POST', body: { text, ...opts } }),
@@ -55,6 +57,7 @@ export const api = {
     accept: (tasks) => req('/tasks/accept', { method: 'POST', body: { tasks } }),
     recommend: () => req('/tasks/recommend'),
     breakdown: (id) => req(`/tasks/${id}/breakdown`, { method: 'POST' }),
+    ground: (id) => req(`/tasks/${id}/ground`, { method: 'POST' }),
     toggleSubtask: (id) => req(`/subtasks/${id}/toggle`, { method: 'POST' }),
   },
   context: {

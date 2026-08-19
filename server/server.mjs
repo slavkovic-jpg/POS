@@ -18,6 +18,9 @@ import { listReviews, getReview, startReview, updateReview, generateReview, gath
 import { captureFromConversation } from './capture.mjs';
 import { backendStatus } from './llm.mjs';
 import { MODES } from './context.mjs';
+import { groundTask, getGrounding, groundingAvailable } from './grounding.mjs';
+import { testBackends } from './diagnostics.mjs';
+import { dashboardSummary } from './dashboard.mjs';
 
 migrate();
 
@@ -38,8 +41,19 @@ app.get('/api/config', (_req, res) => {
     active_backend: active ? active[0] : null,
     fast_backend_available: Object.values(backends).some((b) => b.configured && b.fast),
     modes: Object.entries(MODES).map(([key, m]) => ({ key, label: m.label, hint: m.hint })),
+    grounding_available: groundingAvailable(),
   });
 });
+
+// Live backend test. Makes a real request to each so you can confirm a key
+// actually works rather than merely being present.
+app.get('/api/config/test', async (_req, res) => {
+  try { res.json(await testBackends()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---- Dashboard --------------------------------------------------------------
+app.get('/api/dashboard', (_req, res) => res.json(dashboardSummary()));
 
 // ---- Chat ------------------------------------------------------------------
 app.get('/api/chat/messages', (_req, res) => res.json(recentMessages(100)));
@@ -137,7 +151,7 @@ app.get('/api/tasks/recommend', async (_req, res) => {
 app.get('/api/tasks/:id', (req, res) => {
   const t = getTask(+req.params.id);
   if (!t) return res.status(404).json({ error: 'not found' });
-  res.json({ ...t, subtasks: listSubtasks(t.id) });
+  res.json({ ...t, subtasks: listSubtasks(t.id), grounding: getGrounding(t.id) });
 });
 app.patch('/api/tasks/:id', (req, res) => res.json(updateTask(+req.params.id, req.body || {})));
 app.delete('/api/tasks/:id', (req, res) => { deleteTask(+req.params.id); res.json({ ok: true }); });
@@ -151,6 +165,13 @@ app.post('/api/tasks/:id/breakdown', async (req, res) => {
   }
 });
 app.get('/api/tasks/:id/subtasks', (req, res) => res.json(listSubtasks(+req.params.id)));
+
+// Web-grounded research for one task
+app.post('/api/tasks/:id/ground', async (req, res) => {
+  try { res.json(await groundTask(+req.params.id)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.get('/api/tasks/:id/grounding', (req, res) => res.json(getGrounding(+req.params.id)));
 app.post('/api/subtasks/:id/toggle', (req, res) => {
   try {
     res.json(toggleSubtask(+req.params.id));

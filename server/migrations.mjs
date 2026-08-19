@@ -183,7 +183,8 @@ CREATE TABLE IF NOT EXISTS daily_context (
 // Columns added after the initial schema. SQLite has no "ADD COLUMN IF NOT
 // EXISTS", so check the table info first — this must stay idempotent.
 const addedColumns = [
-  ['tasks', 'rationale', 'TEXT'],   // one-line "why this matters right now"
+  ['tasks', 'rationale', 'TEXT'],       // one-line "why this matters right now"
+  ['tasks', 'grounding_json', 'TEXT'],  // cached web research: summary + sources
 ];
 
 function applyColumnAdditions() {
