@@ -9,6 +9,7 @@
  */
 
 import { generateGemini, geminiEnabled } from './gemini.mjs';
+import { RETRYABLE_STATUS } from './retry.mjs';
 
 const CLAUDE_MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
@@ -77,8 +78,8 @@ async function generateOllama({ system, user, maxTokens, timeoutMs = 300_000, re
       clearTimeout(timeout);
     }
 
-    // 5xx during model load is transient; back off and retry.
-    if (response.status >= 500 && attempt < retries) {
+    // 429 or 5xx (the latter happens during model load) is transient.
+    if (RETRYABLE_STATUS(response.status) && attempt < retries) {
       lastError = `Ollama ${response.status}`;
       await new Promise((r) => setTimeout(r, delay));
       delay *= 2;

@@ -45,17 +45,63 @@ Rules:
 - Pick the domain that actually matches. A call to a family member is a relationships task, not a personal-development one.
 - Start with [ and end with ].`;
 
+/**
+ * Fallback when no model can parse the dump: keep the text as one unscored
+ * task rather than throwing.
+ *
+ * The user typed something they wanted to stop carrying around. Losing it
+ * because a backend was down is the single worst thing this feature could do
+ * — far worse than an unscored task they have to tidy up later. The scores
+ * are the nice-to-have; the capture is the point.
+ */
+function rawFallbackCandidate(text) {
+  const clean = text.trim().replace(/\s+/g, ' ');
+
+  // Prefer the first sentence, but only when it carries enough to be a title.
+  // A dump often opens with a throwaway line ("Head is a mess.") and the real
+  // content follows — using that as the title would be accurate and useless.
+  const first = clean.split(/(?<=[.!?])\s/)[0]?.trim() || '';
+  const usableFirst = first.length >= 25 && first.length <= 90;
+  const title = usableFirst ? first
+    : clean.length <= 90 ? clean
+    : clean.slice(0, 87).trimEnd() + '…';
+
+  return {
+    title,
+    domain_key: null,
+    time_minutes: 30,
+    strategic_importance: 3,
+    energy_required: 3,
+    anxiety_level: 2,
+    rationale: '',
+    // Keep the original whenever the title is not the whole of it.
+    notes: clean === title ? '' : clean,
+  };
+}
+
 export async function unpackThoughts(text) {
   if (!text?.trim()) throw new Error('text required');
   const domains = domainList();
   const validKeys = new Set(domains.map((d) => d.key));
 
-  const result = await oneShotJson({
-    system: UNPACK_SYSTEM(domains),
-    user: text,
-    maxTokens: 1500,
-    timeoutMs: 300_000,
-  });
+  let result;
+  try {
+    result = await oneShotJson({
+      system: UNPACK_SYSTEM(domains),
+      user: text,
+      maxTokens: 1500,
+      timeoutMs: 300_000,
+    });
+  } catch (err) {
+    console.error('[unpack] parsing failed, keeping raw text:', err.message);
+    return {
+      candidates: [rawFallbackCandidate(text)],
+      degraded: true,
+      degraded_reason: err.message,
+      source: null,
+      model: null,
+    };
+  }
 
   const arr = Array.isArray(result.json) ? result.json : [];
   const candidates = arr
@@ -70,7 +116,19 @@ export async function unpackThoughts(text) {
       rationale: (t.rationale || '').toString().trim(),
     }));
 
-  return { candidates, source: result.source, model: result.model };
+  // A model that answered but produced nothing usable is the same outcome as
+  // one that errored, from the user's point of view. Keep the text either way.
+  if (candidates.length === 0) {
+    return {
+      candidates: [rawFallbackCandidate(text)],
+      degraded: true,
+      degraded_reason: 'the model returned no usable tasks',
+      source: result.source,
+      model: result.model,
+    };
+  }
+
+  return { candidates, degraded: false, source: result.source, model: result.model };
 }
 
 /** Persist accepted unpack candidates. */
@@ -249,12 +307,23 @@ export async function recommendNext() {
     tasks: scored,
   };
 
-  const result = await oneShotJson({
-    system: DECIDE_SYSTEM,
-    user: JSON.stringify(payload, null, 2),
-    maxTokens: 800,
-    timeoutMs: 300_000,
-  });
+  let result;
+  try {
+    result = await oneShotJson({
+      system: DECIDE_SYSTEM,
+      user: JSON.stringify(payload, null, 2),
+      maxTokens: 800,
+      timeoutMs: 300_000,
+    });
+  } catch (err) {
+    // The engine's hard rules — fit the window, fit the energy, then prefer
+    // importance — are arithmetic, not judgement. When no model is reachable
+    // we can still answer the question correctly; what's lost is the
+    // reasoning and the primer, not the pick. Degrading to a worse answer
+    // beats refusing to answer the app's central question.
+    console.error('[recommend] model unavailable, using local scoring:', err.message);
+    return localRecommendation(tasks, ctx, scored, err.message);
+  }
 
   const j = result.json || {};
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -288,6 +357,40 @@ export async function recommendNext() {
     model: result.model,
     fallback_used: !!override,
     fallback_reason: override,
+  };
+}
+
+/**
+ * A complete recommendation computed without any model. Same rules the prompt
+ * states, applied directly.
+ */
+function localRecommendation(tasks, ctx, scored, reason) {
+  const eligible = scored.filter((t) => t.fits);
+  const chosen = heuristicPick(tasks, ctx);
+  const runnerUp = eligible.length > 1
+    ? tasks.find((t) => t.id === eligible.find((e) => e.id !== chosen?.id)?.id)
+    : null;
+
+  const overwhelmed = ctx.energy_state === 'overwhelmed';
+  const why = !eligible.length
+    ? `Nothing fits ${ctx.available_minutes} minutes at ${ctx.energy_state} energy, so this is the closest match rather than a good one.`
+    : overwhelmed
+      ? 'Smallest thing that fits, because at overwhelmed energy recovery is the higher-value move.'
+      : `Highest-importance task that fits ${ctx.available_minutes} minutes at ${ctx.energy_state} energy.`;
+
+  return {
+    task: chosen,
+    reasoning: why,
+    mindset_primer: '',
+    runner_up: runnerUp || null,
+    deferred_note: '',
+    context: ctx,
+    source: 'local',
+    model: null,
+    degraded: true,
+    degraded_reason: reason,
+    fallback_used: true,
+    fallback_reason: 'no model reachable; scored locally',
   };
 }
 

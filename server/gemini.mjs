@@ -12,6 +12,8 @@
  * `toGeminiContents()` handles the translation.
  */
 
+import { RETRYABLE_STATUS, retryAfterMs } from './retry.mjs';
+
 const HOST = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // The Canvas prototype used gemini-3-flash-preview and the user confirms it
@@ -79,10 +81,11 @@ export async function generateGemini({
     }
 
     // 429 and 5xx are transient — this backoff is the one genuinely useful
-    // piece of the prototype's fetch wrapper.
-    if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+    // piece of the prototype's fetch wrapper. Google's Retry-After, when
+    // present, is better information than our doubling guess.
+    if (RETRYABLE_STATUS(response.status) && attempt < retries) {
       lastError = `Gemini ${response.status}`;
-      await new Promise((r) => setTimeout(r, delay));
+      await new Promise((r) => setTimeout(r, retryAfterMs(response) ?? delay));
       delay *= 2;
       continue;
     }

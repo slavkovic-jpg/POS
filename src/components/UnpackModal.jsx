@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api.js';
 
 /**
@@ -13,6 +15,7 @@ export default function UnpackModal({ open, text, onClose, onSaved }) {
   const [rows, setRows] = useState([]);
   const [domains, setDomains] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [degraded, setDegraded] = useState(null);
 
   useEffect(() => {
     if (!open) return;
@@ -22,11 +25,12 @@ export default function UnpackModal({ open, text, onClose, onSaved }) {
   useEffect(() => {
     if (!open || !text?.trim()) return;
     let cancelled = false;
-    setLoading(true); setError(null); setRows([]);
+    setLoading(true); setError(null); setRows([]); setDegraded(null);
     api.tasks.unpack(text)
       .then((r) => {
         if (cancelled) return;
-        setSource(`${r.source || '—'}${r.model ? ' · ' + r.model : ''}`);
+        setSource(r.source ? `${r.source}${r.model ? ' · ' + r.model : ''}` : null);
+        if (r.degraded) setDegraded(r.degraded_reason || 'the model could not parse this');
         setRows(r.candidates.map((c, i) => ({ ...c, _id: i, accepted: true })));
       })
       .catch((err) => { if (!cancelled) setError(err.message); })
@@ -68,6 +72,20 @@ export default function UnpackModal({ open, text, onClose, onSaved }) {
         <div className="modal-body">
           {loading && <div className="empty">Unpacking… (may take 1–3 min on Ollama)</div>}
           {error && <div style={{ color: 'var(--danger)', fontSize: 13, padding: 12 }}>{error}</div>}
+
+          {degraded && (
+            <div className="callout warn">
+              <AlertTriangle size={16} />
+              <div>
+                <strong style={{ display: 'block', marginBottom: 2 }}>Saved your text, but couldn't score it</strong>
+                <span style={{ color: 'var(--text-dim)' }}>
+                  {degraded}. Your words are kept as one task rather than lost — edit it below, or
+                  fix the backend on <Link to="/settings">Settings</Link> and unpack again.
+                </span>
+              </div>
+            </div>
+          )}
+
           {!loading && !error && rows.length === 0 && (
             <div className="empty">Nothing actionable found in that. Try adding more detail.</div>
           )}
@@ -118,6 +136,16 @@ export default function UnpackModal({ open, text, onClose, onSaved }) {
                       </select>
                     </div>
                   </div>
+
+                  {/* Only present on the raw fallback, where the title is a
+                      truncation and this holds everything you actually wrote. */}
+                  {r.notes && (
+                    <>
+                      <label style={{ marginTop: 8 }}>Your full text (kept as notes)</label>
+                      <textarea rows={3} value={r.notes}
+                        onChange={(e) => patch(r._id, { notes: e.target.value })} />
+                    </>
+                  )}
 
                   <label style={{ marginTop: 8 }}>Why it matters</label>
                   <input type="text" value={r.rationale || ''}

@@ -1,5 +1,6 @@
 import { db, now } from './db.mjs';
 import { GEMINI_MODEL, geminiEnabled } from './gemini.mjs';
+import { withRetry, RETRYABLE_STATUS, retryAfterMs } from './retry.mjs';
 
 /**
  * Web-grounded research for a single task — the "Ground Web" action from the
@@ -68,33 +69,41 @@ async function groundGemini(query) {
   if (!geminiEnabled()) return null;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 90_000);
-  let response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: query }] }],
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        tools: [{ google_search: {} }],
-      }),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err.name === 'AbortError') throw new Error('Gemini grounding timeout');
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Gemini ${response.status}: ${body.slice(0, 200)}`);
-  }
+  const data = await withRetry(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90_000);
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: query }] }],
+          systemInstruction: { parts: [{ text: SYSTEM }] },
+          tools: [{ google_search: {} }],
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Gemini grounding timeout');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
 
-  const data = await response.json();
+    if (RETRYABLE_STATUS(response.status)) {
+      const wait = retryAfterMs(response);
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      return { retry: true, reason: `Gemini ${response.status}` };
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Gemini ${response.status}: ${body.slice(0, 200)}`);
+    }
+    return { value: await response.json() };
+  }, { label: 'Gemini grounding' });
+
   const candidate = data?.candidates?.[0];
   if (!candidate) throw new Error('Gemini returned no candidates');
 
