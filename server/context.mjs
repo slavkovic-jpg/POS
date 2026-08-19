@@ -1,6 +1,8 @@
 import { getStrategy } from './strategy.mjs';
 import { listKnowledge } from './knowledge.mjs';
 import { listOpenQuestions } from './open-questions.mjs';
+import { listTasks } from './tasks.mjs';
+import { getContext, ENERGY_STATES } from './context-state.mjs';
 
 const PRINCIPLES = `You are the user's Personal Operating System — Chief of Staff, strategic advisor, decision-support engine, and accountability partner.
 
@@ -67,9 +69,33 @@ export function buildSystemPrompt() {
   sections.push(`# Life domains\n${fmtDomains(s.domains)}`);
   sections.push(`# Personal knowledge model\n${fmtKnowledge(knowledge)}`);
   sections.push(`# Open strategic questions\n${fmtOpenQuestions(openQs)}`);
+
+  const ctx = getContext();
   sections.push(
-    `# Today\n${new Date().toISOString().slice(0, 10)} — reflect current conditions (workload, energy, upcoming deadlines) in your recommendations, and ask if you don't know.`
+    `# Current conditions (${new Date().toISOString().slice(0, 10)})\n` +
+    `Energy: ${ctx.energy_label} — ${ENERGY_STATES[ctx.energy_state]?.description}\n` +
+    `Time available: ${ctx.available_minutes} minutes\n` +
+    (ctx.note ? `Note: ${ctx.note}\n` : '') +
+    `\nThese are the user's actual conditions right now, not an aspiration. A recommendation that ` +
+    `does not fit this energy or this window is the wrong recommendation, however important the work is. ` +
+    `When energy is low or overwhelmed, protecting recovery IS the high-value move — say so plainly ` +
+    `rather than negotiating the user into pushing through.`
   );
 
+  sections.push(`# Open tasks\n${fmtTasks(listTasks())}`);
+
   return sections.join('\n\n');
+}
+
+function fmtTasks(tasks) {
+  if (!tasks?.length) return '(no open tasks)';
+  return tasks.slice(0, 15).map((t) => {
+    const bits = [
+      t.time_minutes ? `${t.time_minutes}m` : null,
+      t.strategic_importance ? `importance ${t.strategic_importance}` : null,
+      t.energy_required ? `needs energy ${t.energy_required}/5` : null,
+      t.deferred_count >= 2 ? `DEFERRED ${t.deferred_count}x` : null,
+    ].filter(Boolean).join(', ');
+    return `- ${t.title}${bits ? ` (${bits})` : ''}`;
+  }).join('\n');
 }

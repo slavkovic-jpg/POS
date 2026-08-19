@@ -40,24 +40,51 @@ The Ollama desktop app starts the daemon automatically. If you're running headle
 
 ```
 server/       Express API + SQLite domain modules
-  server.mjs         entry
+  server.mjs         entry + routes
   db.mjs             SQLite handle
-  migrations.mjs     schema
-  chat.mjs           conversation (stubbed responder)
+  migrations.mjs     schema (idempotent; safe to re-run)
+  llm.mjs            shared one-shot LLM helper (Claude -> Ollama -> error)
+  context.mjs        builds the chat system prompt from all state
+  context-state.mjs  current conditions: energy + available time
+  chat.mjs           conversation
+  capture.mjs        chat -> open questions / decisions / knowledge
   strategy.mjs       mission / values / life domains
   knowledge.mjs      personal knowledge model
-  memory.mjs         6 memory layers
   open-questions.mjs unresolved strategic questions
   decisions.mjs      decision journal
-  briefing.mjs       morning briefing + confidence engine
+  onboarding.mjs     profile + CV analysis
+  briefing.mjs       morning briefing + stage tracker
   review.mjs         weekly + monthly reviews
-  tasks.mjs          task intelligence (scored, not just checkboxes)
+  tasks.mjs          task CRUD, subtask rollups, cognitive-load stats
+  task-ai.mjs        unpack / breakdown / decision engine
 src/
-  pages/       Chat, Onboarding, Strategy, Knowledge, Briefing, Decisions, Review
-  components/  ConfidenceBar, BriefingProgress, OpenQuestionsList, ...
+  pages/       Chat, Briefing, Tasks, Strategy, Knowledge, OpenQuestions,
+               Decisions, Reviews, Onboarding
+  components/  ConfidenceBar, StageTracker, CaptureModal, UnpackModal, FocusTimer
   lib/api.js   frontend fetch client
 data/          SQLite lives here (gitignored)
 ```
+
+## The task loop
+
+Tasks are scored on eight dimensions, not just checked off. Three LLM-backed
+operations sit on top:
+
+- **Unpack** — a messy brain dump becomes several scored tasks. Proposed only;
+  nothing is written until you approve each one.
+- **Break down** — a task you keep avoiding becomes 3–6 micro-steps, where the
+  first is startable in under a minute. This is the procrastination
+  intervention, not a planning nicety.
+- **Decide** — given the energy you actually have and the minutes you actually
+  have, one task is chosen, with the reasoning shown so you can disagree.
+
+**Current conditions** (energy + available time) is the input that makes the
+rest honest. A recommendation that doesn't fit the real window is the wrong
+recommendation however important the work is — so the decision engine filters
+on fit *before* importance, and when energy is `overwhelmed` it will choose
+recovery and say so. Time and energy fit are enforced in code, not left to the
+model: a pick that violates them is replaced by local scoring and flagged in
+the UI.
 
 ## Design principles
 
@@ -68,13 +95,16 @@ data/          SQLite lives here (gitignored)
 
 ## Roadmap (v0 → v1)
 
-- [x] Skeleton: server, DB schema, chat page, stubbed responder
-- [ ] Foundational onboarding flow (CV / bio / goals ingest)
-- [ ] Discovery mode (identity / values / current reality)
-- [ ] Strategy scaffold CRUD UI
-- [ ] Morning briefing with confidence bar + stage tracker
-- [ ] Weekly CEO review + monthly strategic review
-- [ ] Decision journal + follow-up scheduling
-- [ ] Swap stub responder for Claude API
-- [ ] Health integrations (Apple Watch / Garmin)
+- [x] Skeleton: server, DB schema, chat page
+- [x] Claude API wired in, with Ollama and stub fallbacks
+- [x] Foundational onboarding (profile, CV analysis, hypothesis review, discovery)
+- [x] Strategy scaffold CRUD UI
+- [x] Weekly + monthly reviews drafted from real activity
+- [x] Decision journal
+- [x] Chat capture — conversation into structured records
+- [x] Tasks: brain-dump unpack, breakdown, decision engine, focus timer
+- [x] Current conditions (energy + available time) feeding every planning surface
+- [ ] Briefing driven by the confidence engine rather than manual stage toggles
+- [ ] Sunday cadence — surface open questions whose review date has arrived
+- [ ] Health integrations (Apple Watch / Garmin) feeding energy automatically
 - [ ] Voice capture (Siri / Google)

@@ -39,9 +39,26 @@ export const api = {
     review: (id, patch) => req(`/decisions/${id}/review`, { method: 'POST', body: patch }),
   },
   tasks: {
-    list: (status) => req('/tasks' + (status ? `?status=${status}` : '')),
+    list: (params = {}) => {
+      const q = new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v != null && v !== '')
+      ).toString();
+      return req('/tasks' + (q ? `?${q}` : ''));
+    },
+    get: (id) => req(`/tasks/${id}`),
     add: (data) => req('/tasks', { method: 'POST', body: data }),
     update: (id, patch) => req(`/tasks/${id}`, { method: 'PATCH', body: patch }),
+    remove: (id) => req(`/tasks/${id}`, { method: 'DELETE' }),
+    stats: () => req('/tasks/stats'),
+    unpack: (text) => req('/tasks/unpack', { method: 'POST', body: { text } }),
+    accept: (tasks) => req('/tasks/accept', { method: 'POST', body: { tasks } }),
+    recommend: () => req('/tasks/recommend'),
+    breakdown: (id) => req(`/tasks/${id}/breakdown`, { method: 'POST' }),
+    toggleSubtask: (id) => req(`/subtasks/${id}/toggle`, { method: 'POST' }),
+  },
+  context: {
+    get: () => req('/context'),
+    set: (patch) => req('/context', { method: 'PATCH', body: patch }),
   },
   briefing: {
     today: () => req('/briefing/today'),

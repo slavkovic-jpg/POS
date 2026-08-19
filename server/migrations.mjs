@@ -154,10 +154,50 @@ CREATE TABLE IF NOT EXISTS health_signals (
   source TEXT,                                 -- apple_watch|garmin|manual|...
   created_at TEXT NOT NULL
 );
+
+-- Micro sub-steps for a task. The anti-procrastination lever: a task that
+-- feels immovable gets broken into 5-minute steps you can start without
+-- deciding anything.
+CREATE TABLE IF NOT EXISTS subtasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  est_minutes INTEGER,
+  done INTEGER NOT NULL DEFAULT 0,             -- 0|1
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subtasks_task ON subtasks(task_id);
+
+-- Current conditions. Answers "what is realistic right now?" — the input the
+-- planner was missing. One row per day; updated as conditions change.
+CREATE TABLE IF NOT EXISTS daily_context (
+  date TEXT PRIMARY KEY,                       -- YYYY-MM-DD
+  energy_state TEXT NOT NULL DEFAULT 'medium', -- peak|medium|low|overwhelmed
+  available_minutes INTEGER NOT NULL DEFAULT 30,
+  note TEXT,
+  updated_at TEXT NOT NULL
+);
 `;
+
+// Columns added after the initial schema. SQLite has no "ADD COLUMN IF NOT
+// EXISTS", so check the table info first — this must stay idempotent.
+const addedColumns = [
+  ['tasks', 'rationale', 'TEXT'],   // one-line "why this matters right now"
+];
+
+function applyColumnAdditions() {
+  for (const [table, column, type] of addedColumns) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (cols.some((c) => c.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    console.log(`[migrate] added ${table}.${column}`);
+  }
+}
 
 export function migrate() {
   db.exec(schema);
+  applyColumnAdditions();
   seedLifeDomains();
   seedStrategyRow();
   seedProfileRow();

@@ -40,39 +40,60 @@ async function generateClaude({ system, user, maxTokens }) {
   return { text, source: 'claude', model: response.model };
 }
 
-async function generateOllama({ system, user, maxTokens, timeoutMs = 300_000 }) {
+async function generateOllama({ system, user, maxTokens, timeoutMs = 300_000, retries = 2 }) {
   if (!OLLAMA_ENABLED) return null;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        stream: false,
-        options: { num_predict: maxTokens },
-      }),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err.name === 'AbortError') throw new Error('Ollama timeout');
-    return null; // connection refused / not running
-  } finally {
-    clearTimeout(timeout);
+
+  let delay = 1000;
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await fetch(`${OLLAMA_HOST}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: OLLAMA_MODEL,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          stream: false,
+          options: { num_predict: maxTokens },
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      // A timeout is not worth retrying — the next attempt would just burn
+      // another full timeout window. Connection refused means Ollama is not
+      // running at all, which is a "not available", not a failure.
+      if (err.name === 'AbortError') throw new Error('Ollama timeout');
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    // 5xx during model load is transient; back off and retry.
+    if (response.status >= 500 && attempt < retries) {
+      lastError = `Ollama ${response.status}`;
+      await new Promise((r) => setTimeout(r, delay));
+      delay *= 2;
+      continue;
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Ollama ${response.status}: ${body.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    const text = (data?.message?.content || '').trim();
+    return { text, source: 'ollama', model: data?.model || OLLAMA_MODEL };
   }
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Ollama ${response.status}: ${body.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  const text = (data?.message?.content || '').trim();
-  return { text, source: 'ollama', model: data?.model || OLLAMA_MODEL };
+
+  throw new Error(`${lastError || 'Ollama'} — exhausted ${retries} retries`);
 }
 
 export async function oneShot({ system, user, maxTokens = 2048, timeoutMs }) {

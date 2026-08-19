@@ -9,7 +9,9 @@ import { getStrategy, updateStrategy, updateDomain } from './strategy.mjs';
 import { listKnowledge, addKnowledge, updateKnowledge, deleteKnowledge } from './knowledge.mjs';
 import { listOpenQuestions, addOpenQuestion, updateOpenQuestion, resolveOpenQuestion } from './open-questions.mjs';
 import { listDecisions, addDecision, reviewDecision } from './decisions.mjs';
-import { listTasks, addTask, updateTask, procrastinationCandidates } from './tasks.mjs';
+import { listTasks, allTasks, getTask, addTask, updateTask, deleteTask, procrastinationCandidates, taskStats } from './tasks.mjs';
+import { getContext, setContext } from './context-state.mjs';
+import { unpackThoughts, acceptTasks, breakdownTask, listSubtasks, toggleSubtask, recommendNext } from './task-ai.mjs';
 import { getOrCreateTodayBriefing, updateBriefing } from './briefing.mjs';
 import { getProfile, updateProfile, completeOnboarding, analyzeCv, acceptHypotheses } from './onboarding.mjs';
 import { listReviews, getReview, startReview, updateReview, generateReview, gatherActivity } from './review.mjs';
@@ -80,10 +82,73 @@ app.post('/api/decisions', (req, res) => res.json(addDecision(req.body || {})));
 app.post('/api/decisions/:id/review', (req, res) => res.json(reviewDecision(+req.params.id, req.body || {})));
 
 // ---- Tasks -----------------------------------------------------------------
-app.get('/api/tasks', (req, res) => res.json(listTasks({ status: req.query.status })));
-app.post('/api/tasks', (req, res) => res.json(addTask(req.body || {})));
-app.patch('/api/tasks/:id', (req, res) => res.json(updateTask(+req.params.id, req.body || {})));
+// NOTE: literal-path routes must precede '/:id' routes, or Express matches
+// '/api/tasks/stats' as id="stats".
+app.get('/api/tasks', (req, res) =>
+  res.json(req.query.all === 'true'
+    ? allTasks()
+    : listTasks({ status: req.query.status, domain_key: req.query.domain_key })));
+app.get('/api/tasks/stats', (_req, res) => res.json(taskStats()));
 app.get('/api/tasks/procrastination', (_req, res) => res.json(procrastinationCandidates()));
+app.post('/api/tasks', (req, res) => res.json(addTask(req.body || {})));
+
+// Brain dump -> structured task candidates (non-mutating; review then accept)
+app.post('/api/tasks/unpack', async (req, res) => {
+  try {
+    res.json(await unpackThoughts(req.body?.text));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/tasks/accept', (req, res) => {
+  const { tasks } = req.body || {};
+  if (!Array.isArray(tasks)) return res.status(400).json({ error: 'tasks array required' });
+  res.json({ saved: acceptTasks(tasks) });
+});
+
+// Decision engine — the single best next action given current conditions
+app.get('/api/tasks/recommend', async (_req, res) => {
+  try {
+    res.json(await recommendNext());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/tasks/:id', (req, res) => {
+  const t = getTask(+req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  res.json({ ...t, subtasks: listSubtasks(t.id) });
+});
+app.patch('/api/tasks/:id', (req, res) => res.json(updateTask(+req.params.id, req.body || {})));
+app.delete('/api/tasks/:id', (req, res) => { deleteTask(+req.params.id); res.json({ ok: true }); });
+
+// Break a task into low-friction micro-steps
+app.post('/api/tasks/:id/breakdown', async (req, res) => {
+  try {
+    res.json(await breakdownTask(+req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.get('/api/tasks/:id/subtasks', (req, res) => res.json(listSubtasks(+req.params.id)));
+app.post('/api/subtasks/:id/toggle', (req, res) => {
+  try {
+    res.json(toggleSubtask(+req.params.id));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// ---- Current conditions ----------------------------------------------------
+app.get('/api/context', (_req, res) => res.json(getContext()));
+app.patch('/api/context', (req, res) => {
+  try {
+    res.json(setContext(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 // ---- Briefing --------------------------------------------------------------
 app.get('/api/briefing/today', (_req, res) => res.json(getOrCreateTodayBriefing()));

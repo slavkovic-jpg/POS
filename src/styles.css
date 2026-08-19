@@ -244,6 +244,61 @@ button.danger { background: var(--danger); }
   border-top: 1px solid var(--border);
 }
 
+/* Segmented control — current-conditions selectors */
+.segmented { display: flex; gap: 4px; flex-wrap: wrap; }
+.segmented .seg {
+  flex: 1;
+  min-width: 90px;
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  font-weight: 500;
+  padding: 9px 10px;
+}
+.segmented .seg:hover { color: var(--text); border-color: var(--accent); }
+.segmented .seg.active {
+  background: var(--accent);
+  color: #0b0d14;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Filter pills */
+.pill {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.pill:hover { color: var(--text); border-color: var(--accent); background: transparent; }
+.pill.active { background: var(--bg-panel); color: var(--accent-strong); border-color: var(--accent); }
+
+/* Task card */
+.task-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 8px;
+}
+.task-card:hover { border-color: #333a52; }
+.task-card.done { opacity: 0.5; }
+.task-rationale {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+button.danger-text { color: var(--danger); }
+button.danger-text:hover { color: var(--danger); border-color: var(--danger); }
+
 /* Toast */
 .toast {
   position: fixed;
