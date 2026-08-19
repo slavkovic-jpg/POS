@@ -11,9 +11,10 @@ async function req(path, opts = {}) {
 }
 
 export const api = {
+  config: () => req('/config'),
   chat: {
     messages: () => req('/chat/messages'),
-    send: (text) => req('/chat/send', { method: 'POST', body: { text } }),
+    send: (text, opts = {}) => req('/chat/send', { method: 'POST', body: { text, ...opts } }),
     capture: (limit = 20) => req('/chat/capture', { method: 'POST', body: { limit } }),
   },
   strategy: {

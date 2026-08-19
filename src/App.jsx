@@ -9,8 +9,10 @@ import OpenQuestionsPage from './pages/OpenQuestionsPage.jsx';
 import OnboardingPage from './pages/OnboardingPage.jsx';
 import ReviewsPage from './pages/ReviewsPage.jsx';
 import TasksPage from './pages/TasksPage.jsx';
+import CopilotPage from './pages/CopilotPage.jsx';
 
 const NAV = [
+  { to: '/copilot', label: 'Copilot' },
   { to: '/chat', label: 'Chat' },
   { to: '/briefing', label: 'Briefing' },
   { to: '/tasks', label: 'Tasks' },
@@ -43,7 +45,8 @@ export default function App() {
       </aside>
       <main className="main">
         <Routes>
-          <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/" element={<Navigate to="/copilot" replace />} />
+          <Route path="/copilot" element={<CopilotPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/briefing" element={<BriefingPage />} />
           <Route path="/tasks" element={<TasksPage />} />

@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { migrate } from './migrations.mjs';
-import { respond, saveMessage, recentMessages } from './chat.mjs';
+import { respond, saveMessage, recentMessages, clearMessages } from './chat.mjs';
 import { getStrategy, updateStrategy, updateDomain } from './strategy.mjs';
 import { listKnowledge, addKnowledge, updateKnowledge, deleteKnowledge } from './knowledge.mjs';
 import { listOpenQuestions, addOpenQuestion, updateOpenQuestion, resolveOpenQuestion } from './open-questions.mjs';
@@ -16,6 +16,8 @@ import { getOrCreateTodayBriefing, updateBriefing } from './briefing.mjs';
 import { getProfile, updateProfile, completeOnboarding, analyzeCv, acceptHypotheses } from './onboarding.mjs';
 import { listReviews, getReview, startReview, updateReview, generateReview, gatherActivity } from './review.mjs';
 import { captureFromConversation } from './capture.mjs';
+import { backendStatus } from './llm.mjs';
+import { MODES } from './context.mjs';
 
 migrate();
 
@@ -25,8 +27,23 @@ app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
+// Which LLM backends are usable, and the conversational modes on offer.
+// The Copilot reads this to warn when voice mode would land on a local model
+// that is too slow to hold a spoken conversation.
+app.get('/api/config', (_req, res) => {
+  const backends = backendStatus();
+  const active = Object.entries(backends).find(([, b]) => b.configured);
+  res.json({
+    backends,
+    active_backend: active ? active[0] : null,
+    fast_backend_available: Object.values(backends).some((b) => b.configured && b.fast),
+    modes: Object.entries(MODES).map(([key, m]) => ({ key, label: m.label, hint: m.hint })),
+  });
+});
+
 // ---- Chat ------------------------------------------------------------------
 app.get('/api/chat/messages', (_req, res) => res.json(recentMessages(100)));
+app.delete('/api/chat/messages', (_req, res) => res.json(clearMessages()));
 app.post('/api/chat/capture', async (req, res) => {
   try {
     const limit = Math.max(2, Math.min(50, Number(req.body?.limit) || 20));
@@ -37,12 +54,14 @@ app.post('/api/chat/capture', async (req, res) => {
   }
 });
 app.post('/api/chat/send', async (req, res) => {
-  const { text } = req.body || {};
+  const { text, mode, spoken } = req.body || {};
   if (!text?.trim()) return res.status(400).json({ error: 'text required' });
   try {
-    saveMessage('user', text);
-    const reply = await respond(text);
+    saveMessage('user', text, mode && mode !== 'advisor' ? { mode } : null);
+    const reply = await respond(text, { mode, spoken: !!spoken });
     const meta = { intent: reply.intent };
+    if (mode && mode !== 'advisor') meta.mode = mode;
+    if (spoken) meta.spoken = true;
     if (reply.model) meta.model = reply.model;
     if (reply.usage) meta.usage = reply.usage;
     if (reply.stop_reason) meta.stop_reason = reply.stop_reason;

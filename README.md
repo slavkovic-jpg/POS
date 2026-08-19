@@ -9,7 +9,7 @@ AI Chief of Staff, strategic advisor, decision engine, and life management platf
 - Node.js + Express (API)
 - SQLite via built-in `node:sqlite` (storage — zero native deps)
 - React + Vite (web UI)
-- Conversation backend, in priority order: **Claude API** (`claude-opus-4-8`, adaptive thinking) → **local Ollama** (default `hermes3:latest`) → built-in stub responder. The chat endpoint tries them in that order and returns the first that succeeds.
+- Conversation backend, in priority order: **Claude API** (`claude-opus-4-8`, adaptive thinking) → **Google Gemini** → **local Ollama** (default `hermes3:latest`) → built-in stub responder. The chat endpoint tries them in that order and returns the first that succeeds.
 
 ## Quick start
 
@@ -64,6 +64,41 @@ src/
   lib/api.js   frontend fetch client
 data/          SQLite lives here (gitignored)
 ```
+
+## Copilot — talking to it
+
+`/copilot` is the voice-first surface, and it shares the conversation thread
+with `/chat` — say something there, it's there when you type here.
+
+Speech uses the **browser's own Web Speech API**, not a cloud TTS. Recognition
+needs Chrome or Edge; synthesis works nearly everywhere. It's free, offline for
+playback, and starts speaking immediately, which matters far more in a
+conversation than voice quality does. Nothing audio is recorded to disk.
+
+**Voice needs a fast backend.** A local model takes a minute or more per reply
+— long enough that a spoken exchange stops being one. Set `ANTHROPIC_API_KEY`
+or `GEMINI_API_KEY`; the Copilot detects this and warns you if neither is
+present. Typing still works fine on any backend.
+
+### Modes
+
+The same knowledge and goals, a different job in the conversation:
+
+| Mode | For | Behaviour |
+|---|---|---|
+| **Advisor** | Decisions and tradeoffs | Recommends, names tradeoffs, pushes back. The default. |
+| **Intake** | Emptying your head | Captures without advising. Reflects one line, then asks what else. |
+| **Coach** | Thinking out loud | Asks more than it answers. Names patterns and checks them. |
+
+Coach mode is explicitly not therapy and is instructed to say so and point you
+elsewhere if a conversation reaches clinical ground.
+
+Two things happen automatically when a reply will be spoken: the formatting
+rules move to the very end of the system prompt, and markdown is stripped from
+prior assistant turns before they're sent as context. Both exist because a
+model imitates the *shape* of what's already in the conversation more strongly
+than it obeys an instruction — one bulleted reply in the history and every
+later spoken turn comes back in bullets regardless of what the prompt says.
 
 ## The task loop
 

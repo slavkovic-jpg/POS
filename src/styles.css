@@ -299,6 +299,48 @@ button.danger { background: var(--danger); }
 button.danger-text { color: var(--danger); }
 button.danger-text:hover { color: var(--danger); border-color: var(--danger); }
 
+/* Voice bar */
+.voice-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-top: 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.voice-bar .mic {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  font-size: 15px;
+  flex-shrink: 0;
+  background: var(--accent);
+  color: #0b0d14;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.voice-bar .mic:disabled { background: var(--border); color: var(--text-faint); cursor: not-allowed; }
+.voice-bar .mic.listening {
+  background: var(--danger);
+  animation: mic-pulse 1.6s ease-out infinite;
+}
+.voice-bar .mic.speaking { background: var(--success); }
+
+/* Ring rather than a flash — a full-element blink is hard to sit next to. */
+@keyframes mic-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.55); }
+  70%  { box-shadow: 0 0 0 14px rgba(248, 113, 113, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-bar .mic.listening { animation: none; box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.5); }
+}
+
 /* Toast */
 .toast {
   position: fixed;

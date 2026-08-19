@@ -5,8 +5,10 @@
  * Chat conversation lives in chat.mjs and has its own history handling.
  * Everything else calls oneShot() here.
  *
- * Fallback order matches chat: Claude -> Ollama -> throw.
+ * Fallback order matches chat: Claude -> Gemini -> Ollama -> throw.
  */
+
+import { generateGemini, geminiEnabled } from './gemini.mjs';
 
 const CLAUDE_MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
@@ -105,13 +107,38 @@ export async function oneShot({ system, user, maxTokens = 2048, timeoutMs }) {
     errors.push(`claude: ${err.message}`);
   }
   try {
+    const g = await generateGemini({
+      system,
+      messages: [{ role: 'user', content: user }],
+      maxTokens,
+    });
+    if (g) return g;
+  } catch (err) {
+    errors.push(`gemini: ${err.message}`);
+  }
+  try {
     const o = await generateOllama({ system, user, maxTokens, timeoutMs });
     if (o) return o;
   } catch (err) {
     errors.push(`ollama: ${err.message}`);
   }
   const suffix = errors.length ? ` (${errors.join('; ')})` : '';
-  throw new Error(`No LLM backend available. Set ANTHROPIC_API_KEY or run Ollama.${suffix}`);
+  throw new Error(
+    `No LLM backend available. Set ANTHROPIC_API_KEY or GEMINI_API_KEY, or run Ollama.${suffix}`
+  );
+}
+
+/**
+ * Which backends are usable right now, fastest-first among the configured
+ * ones. The UI reads this to warn that voice mode on a local model will be
+ * too slow to hold a conversation.
+ */
+export function backendStatus() {
+  return {
+    claude: { configured: !!process.env.ANTHROPIC_API_KEY, model: CLAUDE_MODEL, fast: true },
+    gemini: { configured: geminiEnabled(), model: process.env.GEMINI_MODEL || 'gemini-3-flash-preview', fast: true },
+    ollama: { configured: OLLAMA_ENABLED, model: OLLAMA_MODEL, fast: false },
+  };
 }
 
 /**

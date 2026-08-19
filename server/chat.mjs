@@ -1,10 +1,15 @@
 import { db, now } from './db.mjs';
 import { buildSystemPrompt } from './context.mjs';
+import { generateGemini } from './gemini.mjs';
 
 const MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'hermes3:latest';
 const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== 'false';
+// Single source of truth for how long we wait on a local model. Prompt
+// processing dominates on CPU and the system prompt grows as the user's
+// strategy, tasks and knowledge fill in, so this needs headroom.
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS) || 300_000;
 const HISTORY_TURNS = 20;
 
 let anthropicClient = null;
@@ -62,30 +67,61 @@ function respondStub(userText) {
   };
 }
 
-function buildMessageHistory(userText) {
+/**
+ * Strip markdown so a past reply reads as speech.
+ *
+ * Needed because of format contagion: a model imitates the shape of the
+ * assistant turns already in the conversation far more strongly than it obeys
+ * a formatting instruction in the system prompt. One markdown-formatted reply
+ * in the history — typically from a typed turn, since the same thread carries
+ * both — and every following spoken turn comes back in bullet points no matter
+ * what the prompt says. Observed directly: identical bulleted output before and
+ * after moving the spoken rules to the end of the prompt, because the example
+ * in the history was doing the deciding.
+ */
+function speechify(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^\s*[-*•]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\n{2,}/g, ' ')
+    .replace(/\n/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function buildMessageHistory(userText, { spoken = false } = {}) {
   const history = db.prepare(
     `SELECT role, content FROM chat_messages
      WHERE role IN ('user', 'assistant')
      ORDER BY id DESC LIMIT ?`
   ).all(HISTORY_TURNS).reverse();
-  const messages = history.map((m) => ({ role: m.role, content: m.content }));
+
+  const messages = history.map((m) => ({
+    role: m.role,
+    // Only assistant turns matter here — those are the ones being imitated.
+    content: spoken && m.role === 'assistant' ? speechify(m.content) : m.content,
+  }));
   messages.push({ role: 'user', content: userText });
   return messages;
 }
 
 // ---- Ollama-backed responder (local fallback) ----------------------------
-async function respondOllama(userText) {
+async function respondOllama(userText, opts) {
   if (!OLLAMA_ENABLED) return null;
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt() },
-    ...buildMessageHistory(userText),
+    { role: 'system', content: buildSystemPrompt(opts) },
+    ...buildMessageHistory(userText, { spoken: opts?.spoken }),
   ];
 
   const controller = new AbortController();
-  // First call after model load can be slow (cold start of an 8B model on CPU
-  // takes ~30–90s); subsequent calls are much faster.
-  const timeout = setTimeout(() => controller.abort(), 180_000);
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
   let response;
   try {
     response = await fetch(`${OLLAMA_HOST}/api/chat`, {
@@ -121,17 +157,30 @@ async function respondOllama(userText) {
   };
 }
 
+// ---- Gemini-backed responder (fast; good for voice) ----------------------
+async function respondGemini(userText, opts) {
+  const result = await generateGemini({
+    system: buildSystemPrompt(opts),
+    messages: buildMessageHistory(userText, { spoken: opts?.spoken }),
+    maxTokens: opts?.spoken ? 700 : 2048,
+  });
+  if (!result) return null;
+  return { text: result.text, intent: 'gemini', model: result.model };
+}
+
 // ---- Claude-backed responder ----------------------------------------------
-async function respondClaude(userText) {
+async function respondClaude(userText, opts) {
   const client = await getClient();
   if (!client) return null;
 
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 2048,
+    // Spoken replies are capped shorter: a wall of text is fine to skim but
+    // punishing to listen to.
+    max_tokens: opts?.spoken ? 700 : 2048,
     thinking: { type: 'adaptive' },
-    system: buildSystemPrompt(),
-    messages: buildMessageHistory(userText),
+    system: buildSystemPrompt(opts),
+    messages: buildMessageHistory(userText, { spoken: opts?.spoken }),
   });
 
   const text = response.content
@@ -149,21 +198,33 @@ async function respondClaude(userText) {
   };
 }
 
-export async function respond(userText) {
+export async function respond(userText, opts = {}) {
   const errors = [];
 
-  // 1. Try Claude (preferred, if API key set)
+  // 1. Claude (preferred, if API key set)
   try {
-    const claude = await respondClaude(userText);
+    const claude = await respondClaude(userText, opts);
     if (claude) return claude;
   } catch (err) {
-    console.error('[chat] Claude call failed, trying Ollama:', err.message);
+    console.error('[chat] Claude call failed, trying Gemini:', err.message);
     errors.push(`claude: ${err.message}`);
   }
 
-  // 2. Fall back to local Ollama
+  // 2. Gemini (fast; the practical choice for voice)
   try {
-    const ollama = await respondOllama(userText);
+    const gemini = await respondGemini(userText, opts);
+    if (gemini) {
+      if (errors.length) gemini.fallback_from = errors.join('; ');
+      return gemini;
+    }
+  } catch (err) {
+    console.error('[chat] Gemini call failed, trying Ollama:', err.message);
+    errors.push(`gemini: ${err.message}`);
+  }
+
+  // 3. Local Ollama (private, but too slow to hold a spoken conversation)
+  try {
+    const ollama = await respondOllama(userText, opts);
     if (ollama) {
       if (errors.length) ollama.fallback_from = errors.join('; ');
       return ollama;
@@ -173,7 +234,7 @@ export async function respond(userText) {
     errors.push(`ollama: ${err.message}`);
   }
 
-  // 3. Last resort — scripted stub
+  // 4. Last resort — scripted stub
   const stub = respondStub(userText);
   if (errors.length) {
     return { ...stub, intent: 'stub_after_error', error: errors.join('; ') };
@@ -187,6 +248,17 @@ export function saveMessage(role, content, meta = null) {
     'INSERT INTO chat_messages (role, content, meta, created_at) VALUES (?, ?, ?, ?)'
   ).run(role, content, meta ? JSON.stringify(meta) : null, now());
   return db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(info.lastInsertRowid);
+}
+
+/**
+ * Start a fresh conversation. Captured records (open questions, decisions,
+ * knowledge) are unaffected — those live in their own tables, so clearing the
+ * transcript loses nothing you chose to keep.
+ */
+export function clearMessages() {
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM chat_messages').get();
+  db.prepare('DELETE FROM chat_messages').run();
+  return { cleared: n };
 }
 
 export function recentMessages(limit = 50) {
