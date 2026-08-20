@@ -297,9 +297,32 @@ if (hasDist) {
 app.use((_req, res) => res.status(404).json({ error: 'not found' }));
 
 const PORT = process.env.PORT || 5185;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[pos] server listening on http://localhost:${PORT}`);
   console.log(hasDist
     ? `[pos] serving built UI from ${DIST}`
     : `[pos] dev mode — open http://localhost:5173 for the web UI (run "npm run dev")`);
 });
+
+// A port already in use is the most common way to fail to start, and by far
+// the least interesting. Untrapped it surfaces as an unhandled 'error' event
+// with a twelve-line stack trace that says nothing about what to do.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `\n[pos] Port ${PORT} is already in use — another copy of the server is probably still running.\n` +
+      `      Stop it, or start this one on a different port:\n\n` +
+      `        npm run ports:free       (kills whatever holds ${PORT})\n` +
+      `        PORT=5186 npm run dev    (use another port instead)\n`
+    );
+  } else {
+    console.error(`\n[pos] Could not start: ${err.message}\n`);
+  }
+  process.exit(1);
+});
+
+// Release the port promptly on Ctrl-C, so an immediate restart does not hit
+// the error above.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => server.close(() => process.exit(0)));
+}

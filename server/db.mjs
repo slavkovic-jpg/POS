@@ -19,4 +19,12 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
+// SQLite's default busy timeout is zero: any momentary contention throws
+// "database is locked" immediately instead of waiting. That happens routinely
+// here — `node --watch` starts the replacement process before the old one has
+// released the file, so every restart was a coin flip. Five seconds is far
+// longer than any writer in this app holds a lock, so a real deadlock still
+// surfaces rather than hanging forever.
+db.exec('PRAGMA busy_timeout = 5000');
+
 export const now = () => new Date().toISOString();

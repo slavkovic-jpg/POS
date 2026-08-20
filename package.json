@@ -14,7 +14,8 @@
     "migrate": "node --env-file-if-exists=.env server/migrations.mjs",
     "test:scoring": "node --test \"test/scoring.test.mjs\"",
     "test": "node --test \"test/**/*.test.mjs\"",
-    "test:tasks": "node --test \"test/tasks.test.mjs\""
+    "test:tasks": "node --test \"test/tasks.test.mjs\"",
+    "ports:free": "node scripts/ports-free.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
