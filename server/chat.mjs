@@ -1,15 +1,17 @@
 import { db, now } from './db.mjs';
 import { buildSystemPrompt } from './context.mjs';
 import { generateGemini } from './gemini.mjs';
+import { generateOpenAICompat } from './openai-compat.mjs';
 
 const MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'hermes3:latest';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== 'false';
 // Single source of truth for how long we wait on a local model. Prompt
 // processing dominates on CPU and the system prompt grows as the user's
 // strategy, tasks and knowledge fill in, so this needs headroom.
 const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS) || 300_000;
+const OLLAMA_NUM_CTX = Number(process.env.OLLAMA_NUM_CTX) || 8192;
 const HISTORY_TURNS = 20;
 
 let anthropicClient = null;
@@ -111,6 +113,17 @@ function buildMessageHistory(userText, { spoken = false } = {}) {
   return messages;
 }
 
+// ---- Hosted OpenAI-compatible responder (free tiers; fast) ---------------
+async function respondHosted(userText, opts) {
+  const result = await generateOpenAICompat({
+    system: buildSystemPrompt(opts),
+    messages: buildMessageHistory(userText, { spoken: opts?.spoken }),
+    maxTokens: opts?.spoken ? 700 : 2048,
+  });
+  if (!result) return null;
+  return { text: result.text, intent: 'hosted', model: result.model, usage: result.usage };
+}
+
 // ---- Ollama-backed responder (local fallback) ----------------------------
 async function respondOllama(userText, opts) {
   if (!OLLAMA_ENABLED) return null;
@@ -127,7 +140,20 @@ async function respondOllama(userText, opts) {
     response = await fetch(`${OLLAMA_HOST}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: false }),
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages,
+        stream: false,
+        options: {
+          // Without this, Ollama uses a context far smaller than the model
+          // supports and silently drops the OLDEST tokens on overflow — which
+          // is the system prompt. That looks exactly like "the model ignored
+          // its instructions", and it is why spoken replies kept arriving in
+          // markdown however the prompt was worded.
+          num_ctx: OLLAMA_NUM_CTX,
+          num_predict: opts?.spoken ? 700 : 2048,
+        },
+      }),
       signal: controller.signal,
     });
   } catch (err) {
@@ -222,7 +248,20 @@ export async function respond(userText, opts = {}) {
     errors.push(`gemini: ${err.message}`);
   }
 
-  // 3. Local Ollama (private, but too slow to hold a spoken conversation)
+  // 3. A hosted OpenAI-compatible provider. Several are free and all are far
+  //    faster than CPU inference on this hardware.
+  try {
+    const hosted = await respondHosted(userText, opts);
+    if (hosted) {
+      if (errors.length) hosted.fallback_from = errors.join('; ');
+      return hosted;
+    }
+  } catch (err) {
+    console.error('[chat] Hosted provider failed, trying Ollama:', err.message);
+    errors.push(`hosted: ${err.message}`);
+  }
+
+  // 4. Local Ollama (private, but too slow to hold a spoken conversation)
   try {
     const ollama = await respondOllama(userText, opts);
     if (ollama) {

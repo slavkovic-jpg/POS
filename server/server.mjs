@@ -20,6 +20,7 @@ import { backendStatus } from './llm.mjs';
 import { MODES } from './context.mjs';
 import { groundTask, getGrounding, groundingAvailable } from './grounding.mjs';
 import { testBackends } from './diagnostics.mjs';
+import { FREE_PROVIDERS } from './openai-compat.mjs';
 import { dashboardSummary } from './dashboard.mjs';
 import { loadWeights, setWeight, resetWeights, rankNow, currentBurnout } from './workspace.mjs';
 import * as tasksModule from './tasks.mjs';
@@ -54,6 +55,8 @@ app.get('/api/config', (_req, res) => {
 
 // Live backend test. Makes a real request to each so you can confirm a key
 // actually works rather than merely being present.
+app.get('/api/config/providers', (_req, res) => res.json(FREE_PROVIDERS));
+
 app.get('/api/config/test', async (_req, res) => {
   try { res.json(await testBackends()); }
   catch (err) { res.status(500).json({ error: err.message }); }

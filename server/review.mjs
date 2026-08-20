@@ -1,5 +1,6 @@
 import { db, now } from './db.mjs';
 import { oneShotJson } from './llm.mjs';
+import { REVIEW_SCHEMA } from './schemas.mjs';
 import { getStrategy } from './strategy.mjs';
 import { listOpenQuestions } from './open-questions.mjs';
 
@@ -130,6 +131,7 @@ export async function generateReview(id) {
     user: JSON.stringify(payload, null, 2),
     maxTokens: 2000,
     timeoutMs: 300_000,
+    schema: REVIEW_SCHEMA,
   });
 
   const draft = result.json || {};

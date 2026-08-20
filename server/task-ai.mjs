@@ -2,6 +2,7 @@ import { db, now } from './db.mjs';
 import { oneShotJson } from './llm.mjs';
 import { addTask } from './tasks.mjs';
 import { rankNow } from './workspace.mjs';
+import { unpackSchema, BREAKDOWN_SCHEMA, EXPLAIN_SCHEMA } from './schemas.mjs';
 
 // ---------------------------------------------------------------------------
 // 1. Unpack — a chaotic brain dump becomes structured, scored tasks.
@@ -15,6 +16,8 @@ function domainList() {
 // 1 = highest, and models reliably invert that polarity — producing a
 // perfectly plausible task list ranked exactly backwards, with no error to
 // catch it. Labels cannot be inverted; the mapping happens here.
+const VALID_COMMITMENT_TYPES = new Set(['contracted', 'speculative', 'personal', 'restorative']);
+
 const IMPORTANCE_LABELS = {
   critical: 1,
   high: 2,
@@ -33,6 +36,9 @@ Return ONLY a JSON array (no prose, no markdown, no code fences). Each item:
   "importance": "critical" | "high" | "medium" | "low" | "someday",
   "energy_required": 1-5 (1 = can do while depleted, 5 = needs peak focus),
   "anxiety_level": 1-5 (1 = no dread, 5 = strong avoidance),
+  "income_impact": 0-5 (0 = no money involved, 5 = directly pays the bills),
+  "restorative": 0-5 (0 = costs energy, 5 = genuinely restores you),
+  "commitment_type": "contracted" (promised to someone) | "speculative" | "personal" | "restorative",
   "rationale": "one sentence: why doing this reduces friction or moves something that matters"
 }
 
@@ -42,6 +48,9 @@ Rules:
 - A vague worry ("stressed about the deck") becomes a concrete first action ("Outline the Q3 deck's three key claims").
 - "critical" means it genuinely matters most, not that it merely feels urgent. Reserve it — most items are "medium".
 - Pick the domain that actually matches. A call to a family member is a relationships task, not a personal-development one.
+- "contracted" is only for something another person is actually waiting on. Be strict: it can override everything else in the app.
+- Rest, exercise, hobbies and time with people usually score high on "restorative". Admin and dread usually score 0.
+- Use "none" for domain_key only when nothing fits.
 - Start with [ and end with ].`;
 
 /**
@@ -90,6 +99,7 @@ export async function unpackThoughts(text) {
       user: text,
       maxTokens: 1500,
       timeoutMs: 300_000,
+      schema: unpackSchema(domains.map((d) => d.key)),
     });
   } catch (err) {
     console.error('[unpack] parsing failed, keeping raw text:', err.message);
@@ -107,11 +117,15 @@ export async function unpackThoughts(text) {
     .filter((t) => t?.title?.toString().trim())
     .map((t) => ({
       title: t.title.toString().trim(),
-      domain_key: validKeys.has(t.domain_key) ? t.domain_key : null,
+      domain_key: validKeys.has(t.domain_key) ? t.domain_key : null,   // 'none' falls through to null
       time_minutes: clampInt(t.time_minutes, 5, 480, 30),
       strategic_importance: importanceToRank(t.importance),
       energy_required: clampInt(t.energy_required, 1, 5, 3),
       anxiety_level: clampInt(t.anxiety_level, 1, 5, 2),
+      income_impact: clampInt(t.income_impact, 0, 5, 0),
+      restorative: clampInt(t.restorative, 0, 5, 0),
+      commitment_type: VALID_COMMITMENT_TYPES.has(t.commitment_type)
+        ? t.commitment_type : 'personal',
       rationale: (t.rationale || '').toString().trim(),
     }));
 
@@ -177,6 +191,7 @@ export async function breakdownTask(taskId) {
     user: context,
     maxTokens: 800,
     timeoutMs: 300_000,
+    schema: BREAKDOWN_SCHEMA,
   });
 
   const arr = Array.isArray(result.json) ? result.json : [];
@@ -312,6 +327,7 @@ export async function recommendNext({ capacity } = {}) {
       user: JSON.stringify(payload, null, 2),
       maxTokens: 400,
       timeoutMs: 120_000,
+      schema: EXPLAIN_SCHEMA,
     });
     const j = r.json || {};
     if (j.reasoning) result.reasoning = String(j.reasoning).trim();

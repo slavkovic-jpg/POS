@@ -1,4 +1,5 @@
 import { generateGemini, geminiEnabled, GEMINI_MODEL } from './gemini.mjs';
+import { generateOpenAICompat, openaiCompatEnabled, OPENAI_COMPAT_MODEL, OPENAI_COMPAT_LABEL } from './openai-compat.mjs';
 
 /**
  * Live backend tests. Every check makes a real (tiny) request and reports
@@ -9,7 +10,7 @@ import { generateGemini, geminiEnabled, GEMINI_MODEL } from './gemini.mjs';
 
 const CLAUDE_MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'hermes3:latest';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 
 const PING = 'Reply with exactly the word: pong';
 
@@ -61,6 +62,22 @@ async function testGemini() {
   return { configured: true, model: GEMINI_MODEL, ...r };
 }
 
+async function testHosted() {
+  if (!openaiCompatEnabled()) {
+    return {
+      configured: false, ok: false,
+      reason: 'OPENAI_COMPAT_BASE_URL, _API_KEY and _MODEL not all set',
+    };
+  }
+  const r = await timed(async () => {
+    const res = await generateOpenAICompat({
+      user: PING, maxTokens: 16, timeoutMs: 20_000, retries: 0,
+    });
+    return { model: res.model, reply: (res.text || '').slice(0, 60) };
+  });
+  return { configured: true, model: OPENAI_COMPAT_MODEL, label: OPENAI_COMPAT_LABEL, ...r };
+}
+
 async function testOllama() {
   if (process.env.OLLAMA_ENABLED === 'false') {
     return { configured: false, ok: false, reason: 'OLLAMA_ENABLED=false' };
@@ -88,11 +105,13 @@ async function testOllama() {
 }
 
 export async function testBackends() {
-  const [claude, gemini, ollama] = await Promise.all([testClaude(), testGemini(), testOllama()]);
+  const [claude, gemini, hosted, ollama] = await Promise.all([
+    testClaude(), testGemini(), testHosted(), testOllama(),
+  ]);
   return {
-    claude, gemini, ollama,
+    claude, gemini, hosted, ollama,
     checked_at: new Date().toISOString(),
-    any_working: [claude, gemini, ollama].some((b) => b.ok),
-    fast_working: [claude, gemini].some((b) => b.ok),
+    any_working: [claude, gemini, hosted, ollama].some((b) => b.ok),
+    fast_working: [claude, gemini, hosted].some((b) => b.ok),
   };
 }

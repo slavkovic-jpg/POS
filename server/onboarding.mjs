@@ -1,5 +1,6 @@
 import { db, now } from './db.mjs';
 import { oneShotJson } from './llm.mjs';
+import { CV_SCHEMA } from './schemas.mjs';
 import { addKnowledge } from './knowledge.mjs';
 
 // ---- Profile CRUD ---------------------------------------------------------
@@ -46,6 +47,7 @@ export async function analyzeCv(cvText) {
     user: cvText,
     maxTokens: 1500,
     timeoutMs: 300_000,
+    schema: CV_SCHEMA,
   });
 
   if (!Array.isArray(result.json)) {

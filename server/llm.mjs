@@ -5,16 +5,21 @@
  * Chat conversation lives in chat.mjs and has its own history handling.
  * Everything else calls oneShot() here.
  *
- * Fallback order matches chat: Claude -> Gemini -> Ollama -> throw.
+ * Fallback order: Claude -> Gemini -> a hosted OpenAI-compatible provider
+ * (Groq/Cerebras/OpenRouter/GitHub Models — several have free tiers) ->
+ * local Ollama -> throw.
  */
 
 import { generateGemini, geminiEnabled } from './gemini.mjs';
 import { RETRYABLE_STATUS } from './retry.mjs';
+import { generateOpenAICompat, openaiCompatEnabled, OPENAI_COMPAT_MODEL, OPENAI_COMPAT_LABEL } from './openai-compat.mjs';
 
 const CLAUDE_MODEL = process.env.POS_MODEL || 'claude-opus-4-8';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || 'http://localhost:11434').replace(/\/+$/, '');
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'hermes3:latest';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b';
 const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== 'false';
+// Big enough for the system prompt plus history. Costs RAM, not speed.
+const OLLAMA_NUM_CTX = Number(process.env.OLLAMA_NUM_CTX) || 8192;
 
 let anthropicClient = null;
 async function getClaude() {
@@ -43,7 +48,17 @@ async function generateClaude({ system, user, maxTokens }) {
   return { text, source: 'claude', model: response.model };
 }
 
-async function generateOllama({ system, user, maxTokens, timeoutMs = 300_000, retries = 2 }) {
+/**
+ * @param schema  A JSON Schema. When supplied, Ollama constrains decoding to
+ *                it, so the model *cannot* emit invalid JSON — the structure
+ *                is guaranteed by the sampler rather than requested politely
+ *                in the prompt and hoped for. This removes the entire class of
+ *                "returned prose instead of JSON" failure on small models.
+ */
+async function generateOllama({
+  system, user, maxTokens, timeoutMs = 300_000, retries = 2,
+  schema = null, temperature = null,
+}) {
   if (!OLLAMA_ENABLED) return null;
 
   let delay = 1000;
@@ -64,7 +79,19 @@ async function generateOllama({ system, user, maxTokens, timeoutMs = 300_000, re
             { role: 'user', content: user },
           ],
           stream: false,
-          options: { num_predict: maxTokens },
+          ...(schema ? { format: schema } : {}),
+          options: {
+            num_predict: maxTokens,
+            // Ollama's default context is far smaller than most models
+            // support, and it silently drops the OLDEST tokens when the
+            // prompt overflows — which is exactly where the instructions
+            // live. Set it explicitly rather than discovering the truncation
+            // as "the model ignored the system prompt".
+            num_ctx: OLLAMA_NUM_CTX,
+            // Extraction is not a creative task. Ollama defaults to 0.8,
+            // which is why the same dump produced different scores each run.
+            temperature: temperature ?? (schema ? 0 : 0.7),
+          },
         }),
         signal: controller.signal,
       });
@@ -99,7 +126,7 @@ async function generateOllama({ system, user, maxTokens, timeoutMs = 300_000, re
   throw new Error(`${lastError || 'Ollama'} — exhausted ${retries} retries`);
 }
 
-export async function oneShot({ system, user, maxTokens = 2048, timeoutMs }) {
+export async function oneShot({ system, user, maxTokens = 2048, timeoutMs, schema, temperature }) {
   const errors = [];
   try {
     const c = await generateClaude({ system, user, maxTokens });
@@ -118,14 +145,20 @@ export async function oneShot({ system, user, maxTokens = 2048, timeoutMs }) {
     errors.push(`gemini: ${err.message}`);
   }
   try {
-    const o = await generateOllama({ system, user, maxTokens, timeoutMs });
+    const h = await generateOpenAICompat({ system, user, maxTokens, schema, temperature });
+    if (h) return h;
+  } catch (err) {
+    errors.push(`hosted: ${err.message}`);
+  }
+  try {
+    const o = await generateOllama({ system, user, maxTokens, timeoutMs, schema, temperature });
     if (o) return o;
   } catch (err) {
     errors.push(`ollama: ${err.message}`);
   }
   const suffix = errors.length ? ` (${errors.join('; ')})` : '';
   throw new Error(
-    `No LLM backend available. Set ANTHROPIC_API_KEY or GEMINI_API_KEY, or run Ollama.${suffix}`
+    `No LLM backend available. Add a free hosted provider in Settings, or run Ollama.${suffix}`
   );
 }
 
@@ -138,6 +171,7 @@ export function backendStatus() {
   return {
     claude: { configured: !!process.env.ANTHROPIC_API_KEY, model: CLAUDE_MODEL, fast: true },
     gemini: { configured: geminiEnabled(), model: process.env.GEMINI_MODEL || 'gemini-3-flash-preview', fast: true },
+    hosted: { configured: openaiCompatEnabled(), model: OPENAI_COMPAT_MODEL, label: OPENAI_COMPAT_LABEL, fast: true },
     ollama: { configured: OLLAMA_ENABLED, model: OLLAMA_MODEL, fast: false },
   };
 }
@@ -147,6 +181,8 @@ export function backendStatus() {
  * if present. Throws if parsing fails.
  */
 export async function oneShotJson(params) {
+  // A schema here is not documentation — Ollama uses it to constrain
+  // decoding, and the hosted providers use it for their own JSON modes.
   const result = await oneShot(params);
   const parsed = tryParseJson(result.text);
   if (parsed === null) {

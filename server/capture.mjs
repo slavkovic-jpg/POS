@@ -1,5 +1,6 @@
 import { db } from './db.mjs';
 import { oneShotJson } from './llm.mjs';
+import { CAPTURE_SCHEMA } from './schemas.mjs';
 
 const CAPTURE_SYSTEM = `Scan the recent conversation between the user and the assistant. Return a JSON object with three arrays of items worth persisting to the user's Personal OS.
 
@@ -44,6 +45,7 @@ export async function captureFromConversation({ limit = 20 } = {}) {
     user: transcript,
     maxTokens: 1500,
     timeoutMs: 300_000,
+    schema: CAPTURE_SCHEMA,
   });
 
   const j = result.json || {};

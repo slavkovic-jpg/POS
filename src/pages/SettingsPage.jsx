@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
   Settings, CheckCircle2, XCircle, MinusCircle, RefreshCw,
-  AlertTriangle, Zap, Server,
+  AlertTriangle, Zap, Server, ExternalLink,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { Callout } from '../components/ui.jsx';
 
 const LABELS = {
-  claude: { name: 'Claude (Anthropic)', env: 'ANTHROPIC_API_KEY', note: 'Best quality. Fast enough for voice.' },
-  gemini: { name: 'Google Gemini',      env: 'GEMINI_API_KEY',    note: 'Fast and cheap. Fine for voice.' },
-  ollama: { name: 'Ollama (local)',     env: 'OLLAMA_HOST',       note: 'Private and offline, but too slow for voice.' },
+  claude: { name: 'Claude (Anthropic)', env: 'ANTHROPIC_API_KEY', note: 'Best quality. Paid.' },
+  gemini: { name: 'Google Gemini',      env: 'GEMINI_API_KEY',    note: 'Fast. Free tier is unavailable in some countries.' },
+  hosted: { name: 'Hosted provider',    env: 'OPENAI_COMPAT_*',   note: 'Groq, Cerebras, OpenRouter, GitHub Models — several are free.' },
+  ollama: { name: 'Ollama (local)',     env: 'OLLAMA_MODEL',      note: 'Private and offline. CPU-only here, so slow.' },
 };
 
 /**
@@ -58,7 +59,7 @@ export default function SettingsPage() {
         {error && <Callout tone="danger" icon={AlertTriangle} title="Test failed">{error}</Callout>}
 
         <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
-          {['claude', 'gemini', 'ollama'].map((key) => {
+          {['claude', 'gemini', 'hosted', 'ollama'].map((key) => {
             const cfg = config?.backends?.[key];
             const res = result?.[key];
             return <BackendRow key={key} id={key} cfg={cfg} res={res} />;
@@ -94,6 +95,7 @@ export default function SettingsPage() {
         <div className="row-flex" style={{ flexWrap: 'wrap', fontFamily: 'var(--mono)', fontSize: 12.5 }}>
           <span className="badge ok">Claude</span><span style={{ color: 'var(--text-faint)' }}>→</span>
           <span className="badge exploring">Gemini</span><span style={{ color: 'var(--text-faint)' }}>→</span>
+          <span className="badge exploring">Hosted</span><span style={{ color: 'var(--text-faint)' }}>→</span>
           <span className="badge awaiting">Ollama</span><span style={{ color: 'var(--text-faint)' }}>→</span>
           <span className="badge">scripted stub</span>
         </div>
@@ -104,6 +106,8 @@ export default function SettingsPage() {
           training data would look like research without being it.
         </p>
       </div>
+
+      <FreeProviders />
 
       <div className="panel">
         <h2>Editing configuration</h2>
@@ -126,6 +130,64 @@ POS_MODEL=claude-opus-4-8
 GEMINI_MODEL=gemini-3-flash-preview
 OLLAMA_MODEL=hermes3:latest`}</pre>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Free options, listed with the exact values to paste. Included because "use a
+ * hosted provider" is useless advice without knowing which ones cost nothing.
+ */
+function FreeProviders() {
+  const [providers, setProviders] = useState([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/config/providers').then((r) => r.json()).then(setProviders).catch(() => {});
+  }, []);
+
+  if (!providers.length) return null;
+
+  return (
+    <div className="panel">
+      <div className="section-head">
+        <h2><Zap size={15} />Free options</h2>
+        <button className="ghost" onClick={() => setOpen((v) => !v)}>
+          {open ? 'Hide' : 'Show setup'}
+        </button>
+      </div>
+      <p style={{ color: 'var(--text-dim)', fontSize: 13, marginTop: 0 }}>
+        This machine has no CUDA GPU, so local inference runs on the CPU at a few tokens per
+        second. Each of these is far faster and costs nothing at personal volumes. Pick one, put
+        three lines in <code>.env</code>, restart, then press Test connections above.
+      </p>
+
+      {open && (
+        <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+          {providers.map((p) => (
+            <div key={p.id} style={{
+              background: 'var(--bg-inset)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)', padding: '13px 15px',
+            }}>
+              <div className="row-flex" style={{ justifyContent: 'space-between' }}>
+                <strong>{p.name}</strong>
+                <a href={p.signup} target="_blank" rel="noreferrer" className="badge exploring">
+                  Get a key <ExternalLink size={9} />
+                </a>
+              </div>
+              <div className="item-meta" style={{ marginTop: 4 }}>{p.note}</div>
+              <pre style={{
+                background: 'var(--bg)', border: '1px solid var(--border)',
+                borderRadius: 6, padding: 10, fontSize: 11.5, marginTop: 9,
+                fontFamily: 'var(--mono)', overflowX: 'auto', color: 'var(--text-dim)',
+              }}>{`OPENAI_COMPAT_BASE_URL=${p.base_url}
+OPENAI_COMPAT_API_KEY=<your key>
+OPENAI_COMPAT_MODEL=${p.example_model}
+OPENAI_COMPAT_LABEL=${p.name}`}</pre>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
