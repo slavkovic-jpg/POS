@@ -4,6 +4,7 @@ import { getStrategy } from './strategy.mjs';
 import { listTasks, taskStats, procrastinationCandidates } from './tasks.mjs';
 import { listOpenQuestions } from './open-questions.mjs';
 import { getOrCreateTodayBriefing } from './briefing.mjs';
+import { rankNow } from './workspace.mjs';
 import { getProfile } from './onboarding.mjs';
 
 /**
@@ -24,14 +25,11 @@ export function dashboardSummary() {
   const tasks = listTasks();
   const profile = getProfile();
 
-  const maxEnergy = { peak: 5, medium: 4, low: 2, overwhelmed: 1 }[ctx.energy_state] ?? 3;
-
-  // Tasks that fit the window AND the energy — the honest "you could do this
-  // now" list, computed the same way the decision engine computes it.
-  const doable = tasks
-    .filter((t) => (t.time_minutes ?? 30) <= ctx.available_minutes
-                && (t.energy_required ?? 3) <= maxEnergy)
-    .sort((a, b) => (a.strategic_importance ?? 3) - (b.strategic_importance ?? 3));
+  // Ranked by the same engine the recommendation uses. Previously this file
+  // re-implemented the fit rule with its own inline energy map, which had
+  // already drifted from context-state.mjs — two answers to one question.
+  const ranked = rankNow({ limit: 8 });
+  const doable = ranked.suggestions.filter((s) => s.fits);
 
   const questions = listOpenQuestions();
   const today = new Date().toISOString().slice(0, 10);
@@ -71,10 +69,19 @@ export function dashboardSummary() {
     tasks: {
       doable: doable.slice(0, 6),
       doable_count: doable.length,
-      blocked_count: tasks.length - doable.length,
+      blocked_count: ranked.suggestions.length - doable.length,
       total_open: tasks.length,
       procrastinating: procrastinationCandidates().slice(0, 4),
+      suppressed: ranked.suggestions.filter((s) => s.suppressed).length,
     },
+    ranking: {
+      tier: ranked.tier,
+      tier_reason: ranked.tierReason,
+      income_at_risk: ranked.incomeAtRisk,
+    },
+    burnout: ranked.burnout,
+    risks: ranked.risks.slice(0, 5),
+    waiting: ranked.waiting.slice(0, 5),
     stats,
     questions: { open: questions.slice(0, 5), open_count: questions.length, due: dueQuestions },
     briefing: getOrCreateTodayBriefing(),

@@ -173,9 +173,9 @@ export default function TasksPage() {
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>{rec.task.title}</div>
                 <div className="item-meta">
-                  {rec.task.domain_key && <span className="badge">{rec.task.domain_key}</span>}
-                  {rec.task.time_minutes != null && <span> · {rec.task.time_minutes}m</span>}
-                  {rec.task.strategic_importance != null && <span> · importance {rec.task.strategic_importance}</span>}
+                  {rec.task.domainKey && <DomainBadge domainKey={rec.task.domainKey} size="sm" />}
+                  {rec.task.effortMinutes != null && <span> · {rec.task.effortMinutes}m</span>}
+                  {rec.task.slack?.band === 'critical' && <span className="badge danger">cannot be finished in time</span>}
                 </div>
               </div>
               <div className="row-flex">
@@ -207,9 +207,10 @@ export default function TasksPage() {
               {rec.runner_up && (
                 <div className="item-meta">Runner-up: {rec.runner_up.title}</div>
               )}
-              {rec.fallback_used && (
-                <div className="item-meta" style={{ color: 'var(--warn)' }}>
-                  Local scoring used — {rec.fallback_reason}.
+              {!rec.explained && (
+                <div className="item-meta">
+                  Scored locally. The ranking is exactly as it would be with a model connected —
+                  only the wording is unpolished.
                 </div>
               )}
             </div>

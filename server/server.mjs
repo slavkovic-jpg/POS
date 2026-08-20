@@ -21,6 +21,7 @@ import { MODES } from './context.mjs';
 import { groundTask, getGrounding, groundingAvailable } from './grounding.mjs';
 import { testBackends } from './diagnostics.mjs';
 import { dashboardSummary } from './dashboard.mjs';
+import { loadWeights, setWeight, resetWeights, rankNow, currentBurnout } from './workspace.mjs';
 
 migrate();
 
@@ -179,6 +180,27 @@ app.post('/api/subtasks/:id/toggle', (req, res) => {
     res.status(404).json({ error: err.message });
   }
 });
+
+// ---- Scoring -----------------------------------------------------------------
+// The full ranking, computed locally. No model involved, so this answers even
+// with every backend down.
+app.get('/api/ranking', (req, res) => {
+  try {
+    res.json(rankNow({ limit: Number(req.query.limit) || 10, capacity: req.query.capacity }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/burnout', (_req, res) => res.json(currentBurnout()));
+app.get('/api/weights', (_req, res) => res.json(loadWeights()));
+app.patch('/api/weights', (req, res) => {
+  try {
+    const entries = Object.entries(req.body || {});
+    if (!entries.length) return res.status(400).json({ error: 'no weights supplied' });
+    let out;
+    for (const [k, v] of entries) out = setWeight(k, v);
+    res.json(out);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+app.post('/api/weights/reset', (_req, res) => res.json(resetWeights()));
 
 // ---- Current conditions ----------------------------------------------------
 app.get('/api/context', (_req, res) => res.json(getContext()));

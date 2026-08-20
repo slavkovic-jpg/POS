@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Sparkles, Target, Zap, Clock, ListTodo, HelpCircle, CalendarCheck,
   Brain, AlertTriangle, ArrowRight, Timer, Layers, Globe, Check,
-  Compass, TrendingUp, Inbox, MessageSquare,
+  Compass, TrendingUp, Inbox, MessageSquare, Battery,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { ENERGY_META } from '../lib/domains.js';
@@ -153,13 +153,29 @@ export default function DashboardPage() {
 
           {rec?.empty && <div className="empty">{rec.reason}</div>}
 
+          {rec?.tier === 'commitment_at_risk' && (
+            <Callout tone="danger" icon={AlertTriangle} title="A promise is at risk">
+              {rec.tier_reason}
+            </Callout>
+          )}
+          {rec?.tier === 'burnout_guard' && (
+            <Callout tone="warn" icon={Battery} title="Recovery first">
+              {rec.tier_reason}
+            </Callout>
+          )}
+
           {rec?.task && (
-            <HueScope domainKey={rec.task.domain_key}>
+            <HueScope domainKey={rec.task.domainKey}>
               <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 7 }}>{rec.task.title}</div>
               <div className="row-flex" style={{ flexWrap: 'wrap', marginBottom: 12 }}>
-                {rec.task.domain_key && <DomainBadge domainKey={rec.task.domain_key} />}
-                <span className="badge"><Clock size={11} />{rec.task.time_minutes}m</span>
-                <span className="badge">importance {rec.task.strategic_importance}</span>
+                {rec.task.domainKey && <DomainBadge domainKey={rec.task.domainKey} />}
+                {rec.task.effortMinutes != null && (
+                  <span className="badge"><Clock size={11} />{rec.task.effortMinutes}m</span>
+                )}
+                {rec.task.slack?.band === 'critical' && (
+                  <span className="badge danger"><AlertTriangle size={11} />cannot be finished in time</span>
+                )}
+                {rec.task.incomeImpact > 0 && <span className="badge ok">income</span>}
               </div>
 
               <div style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 8 }}>
@@ -171,9 +187,10 @@ export default function DashboardPage() {
                   {rec.mindset_primer}
                 </div>
               )}
-              {rec.fallback_used && (
-                <div className="item-meta" style={{ color: 'var(--warn)', marginBottom: 10 }}>
-                  Local scoring used — {rec.fallback_reason}.
+              {!rec.explained && (
+                <div className="item-meta">
+                  Scored locally. The ranking is exactly as it would be with a model connected —
+                  only the wording is unpolished.
                 </div>
               )}
 
@@ -218,14 +235,18 @@ export default function DashboardPage() {
           ) : (
             <div>
               {d.tasks.doable.map((t) => (
-                <HueScope key={t.id} domainKey={t.domain_key} className="task-card">
+                <HueScope key={t.id} domainKey={t.domainKey} className="task-card">
                   <div className="row-flex" style={{ justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 520 }}>{t.title}</div>
                       <div className="row-flex" style={{ marginTop: 5, flexWrap: 'wrap', gap: 6 }}>
-                        {t.domain_key && <DomainBadge domainKey={t.domain_key} size="sm" />}
-                        <span className="item-meta">{t.time_minutes}m · importance {t.strategic_importance}</span>
+                        {t.domainKey && <DomainBadge domainKey={t.domainKey} size="sm" />}
+                        {t.effortMinutes != null && <span className="item-meta">{t.effortMinutes}m</span>}
+                        {t.suppressed && <span className="badge awaiting">held back</span>}
                       </div>
+                      {t.reasons?.[0] && (
+                        <div className="item-meta" style={{ marginTop: 5 }}>{t.reasons[0]}</div>
+                      )}
                     </div>
                     <div className="row-flex" style={{ gap: 5 }}>
                       <button className="ghost sm" onClick={() => setTimerTask(t)} title="Start a focus block"><Timer size={12} /></button>

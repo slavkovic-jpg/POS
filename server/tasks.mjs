@@ -31,40 +31,49 @@ export function deleteTask(id) {
   db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
 }
 
+/**
+ * Every field a caller may set on a task.
+ *
+ * Derived once and shared by insert and update, because the previous
+ * hardcoded INSERT column list silently dropped four newly-added scoring
+ * fields: the API returned 200, the row looked saved, and the scorer quietly
+ * used defaults. A task worth 150 points ranked below a ten-minute walk and
+ * nothing anywhere reported a problem. Anything not on this list is ignored
+ * on purpose (id, timestamps, deferred_count, grounding_json).
+ */
+export const WRITABLE_TASK_FIELDS = [
+  'title', 'notes', 'rationale', 'domain_key', 'status',
+  'difficulty', 'engagement', 'satisfaction', 'strategic_importance',
+  'energy_required', 'anxiety_level', 'time_minutes', 'learning_value',
+  'due_date',
+  // Merged in from ExecAgent
+  'project_id', 'action_type', 'definition_of_done', 'blocked_by', 'source_ref',
+  // The weighting dimensions
+  'income_impact', 'commitment_type', 'effort_remaining_minutes', 'restorative',
+];
+
+const INSERT_DEFAULTS = {
+  notes: '', strategic_importance: 3, income_impact: 0, restorative: 0,
+  commitment_type: 'personal',
+};
+
 export function addTask(task) {
   const t = now();
-  const info = db.prepare(
-    `INSERT INTO tasks
-       (title, notes, rationale, domain_key, difficulty, engagement, satisfaction,
-        strategic_importance, energy_required, anxiety_level, time_minutes,
-        learning_value, due_date, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    task.title,
-    task.notes ?? '',
-    task.rationale ?? null,
-    task.domain_key ?? null,
-    task.difficulty ?? null,
-    task.engagement ?? null,
-    task.satisfaction ?? null,
-    task.strategic_importance ?? 3,
-    task.energy_required ?? null,
-    task.anxiety_level ?? null,
-    task.time_minutes ?? null,
-    task.learning_value ?? null,
-    task.due_date ?? null,
-    t,
-    t,
+  const cols = WRITABLE_TASK_FIELDS.filter(
+    (c) => task[c] !== undefined || c in INSERT_DEFAULTS
   );
+  const values = cols.map((c) => task[c] ?? INSERT_DEFAULTS[c] ?? null);
+
+  const info = db.prepare(
+    `INSERT INTO tasks (${cols.join(', ')}, created_at, updated_at)
+     VALUES (${cols.map(() => '?').join(', ')}, ?, ?)`
+  ).run(...values, t, t);
+
   return getTask(info.lastInsertRowid);
 }
 
 export function updateTask(id, patch) {
-  const cols = [
-    'title', 'notes', 'rationale', 'domain_key', 'status', 'difficulty', 'engagement',
-    'satisfaction', 'strategic_importance', 'energy_required', 'anxiety_level',
-    'time_minutes', 'learning_value', 'due_date',
-  ];
+  const cols = WRITABLE_TASK_FIELDS;
   const fields = [];
   const args = [];
   for (const k of cols) {

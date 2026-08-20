@@ -1,8 +1,7 @@
 import { db, now } from './db.mjs';
 import { oneShotJson } from './llm.mjs';
-import { getStrategy } from './strategy.mjs';
-import { listTasks, addTask } from './tasks.mjs';
-import { getContext, ENERGY_STATES } from './context-state.mjs';
+import { addTask } from './tasks.mjs';
+import { rankNow } from './workspace.mjs';
 
 // ---------------------------------------------------------------------------
 // 1. Unpack — a chaotic brain dump becomes structured, scored tasks.
@@ -228,184 +227,120 @@ export function toggleSubtask(id) {
 
 // ---------------------------------------------------------------------------
 // 3. Decision engine — "what should I actually do right now?"
+//
+// The ranking is computed by server/scoring.mjs: pure arithmetic, fully tested,
+// works with every backend unreachable. A model is used only to PHRASE the
+// result — it never chooses. That removes an entire class of failure (the model
+// inverting a scale, hallucinating an id, or wasting a peak window) and means
+// the app's central question keeps working offline and for free.
 // ---------------------------------------------------------------------------
 
-const DECIDE_SYSTEM = `You are the decision engine of a Personal OS. Pick the ONE task the user should do right now.
+const EXPLAIN_SYSTEM = `You are the voice of a Personal OS that has already decided what the user should do next. The decision is made; do not revisit it.
 
-You receive their current energy, the minutes they actually have, and their open tasks. Each task is pre-marked with "fits": true means it fits BOTH the time window and the energy state. Tasks are pre-sorted: eligible tasks first, most important first within that.
+You receive the chosen item, the factors that produced its score, and the user's current conditions. Write the handover.
 
 Return ONLY this JSON object (no prose, no markdown):
 {
-  "task_id": <id of the chosen task>,
-  "reasoning": "2 sentences: why this task, for this energy, in this time window",
-  "mindset_primer": "one sentence to say to yourself before starting — concrete, not a platitude",
-  "runner_up_id": <id or null>,
-  "deferred_note": "one sentence if something important is being consciously set aside, else empty string"
+  "reasoning": "at most 2 sentences: why this, for this energy, in this window",
+  "mindset_primer": "one sentence to say to yourself before starting — concrete and specific to this task, never a platitude",
+  "deferred_note": "one sentence if something notable is being consciously set aside, else empty string"
 }
 
-Decide in this order:
+Rules:
+- Never contradict or second-guess the choice. If it looks odd, explain the reasoning that produced it.
+- The supplied reasons are already true. Compress them; do not invent new ones.
+- Never comment on the person. Describe the work, the date, or who is waiting — never "you failed to", "you have been avoiding", or the polite versions.
+- If the item cannot be delivered in time, say so plainly. Do not soften it into encouragement.
+- Plain sentences. No lists, no headings.`;
 
-STEP 1 — If energy is "overwhelmed": pick the smallest restorative or clearing action and stop. Recovery IS the correct move at this energy; say so plainly. Ignore the remaining steps.
+export async function recommendNext({ capacity } = {}) {
+  const ranked = rankNow({ limit: 5, capacity });
 
-STEP 2 — Otherwise, consider ONLY tasks with "fits": true. Among those, pick the one with the LOWEST strategic_importance number (1 is the most important). That is your default answer.
-
-STEP 3 — Depart from step 2 only for a reason you can state in one sentence. Legitimate reasons: a hard deadline on a less important task; a task deferred 3+ times where breaking the avoidance now matters more (only when energy is medium or better).
-
-Two ways to get this wrong, both of which you must avoid:
-- Picking a task that does not fit. A 90-minute task in a 20-minute window fails, however important it is.
-- WASTING A GOOD WINDOW. When energy is peak or medium and a large window is available, picking a short low-importance task (a walk, a quick email, tidying) is WRONG even though it technically "fits". Long high-energy windows are scarce; spend them on the most important work that fits. Restorative tasks are for low or overwhelmed energy, or for leftover minutes — not for the best window of the day.
-
-If no task has "fits": true, pick the closest and say plainly in the reasoning that nothing fits well.`;
-
-export async function recommendNext() {
-  const ctx = getContext();
-  const tasks = listTasks();
-
-  if (tasks.length === 0) {
-    return { empty: true, reason: 'No open tasks. Add some, or dump a thought and let the system unpack it.' };
-  }
-
-  const strategy = getStrategy();
-  const maxEnergy = ENERGY_STATES[ctx.energy_state]?.max_task_energy ?? 3;
-
-  // Compute eligibility here rather than asking the model to infer it, and
-  // present the strongest candidate first. Small models weight list order
-  // heavily, so the ordering is doing real work — not just cosmetics.
-  const scored = tasks.map((t) => {
-    const fitsWindow = (t.time_minutes ?? 30) <= ctx.available_minutes;
-    const fitsEnergy = (t.energy_required ?? 3) <= maxEnergy;
+  if (!ranked.suggestions.length) {
     return {
-      id: t.id,
-      title: t.title,
-      domain: t.domain_key,
-      time_minutes: t.time_minutes,
-      strategic_importance: t.strategic_importance,
-      energy_required: t.energy_required,
-      anxiety_level: t.anxiety_level,
-      deferred_count: t.deferred_count,
-      rationale: t.rationale || undefined,
-      due_date: t.due_date || undefined,
-      fits: fitsWindow && fitsEnergy,
-      why_not: fitsWindow ? (fitsEnergy ? undefined : 'needs more energy than you have')
-                          : 'longer than the window',
+      empty: true,
+      reason: 'Nothing open. Dump a thought and let it be unpacked, or say it out loud.',
+      burnout: ranked.burnout,
+      context: ranked,
     };
-  }).sort((a, b) =>
-    (b.fits - a.fits) ||
-    ((a.strategic_importance ?? 3) - (b.strategic_importance ?? 3))
-  );
-
-  const payload = {
-    current_energy: ctx.energy_state,
-    energy_meaning: ENERGY_STATES[ctx.energy_state]?.description,
-    available_minutes: ctx.available_minutes,
-    context_note: ctx.note || null,
-    mission: strategy.mission || null,
-    top_priority_domains: strategy.domains
-      .filter((d) => d.priority <= 2)
-      .map((d) => d.name),
-    eligible_count: scored.filter((t) => t.fits).length,
-    tasks: scored,
-  };
-
-  let result;
-  try {
-    result = await oneShotJson({
-      system: DECIDE_SYSTEM,
-      user: JSON.stringify(payload, null, 2),
-      maxTokens: 800,
-      timeoutMs: 300_000,
-    });
-  } catch (err) {
-    // The engine's hard rules — fit the window, fit the energy, then prefer
-    // importance — are arithmetic, not judgement. When no model is reachable
-    // we can still answer the question correctly; what's lost is the
-    // reasoning and the primer, not the pick. Degrading to a worse answer
-    // beats refusing to answer the app's central question.
-    console.error('[recommend] model unavailable, using local scoring:', err.message);
-    return localRecommendation(tasks, ctx, scored, err.message);
   }
 
-  const j = result.json || {};
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const fitsById = new Map(scored.map((t) => [t.id, t.fits]));
+  const top = ranked.suggestions[0];
+  const runnerUp = ranked.suggestions[1] || null;
 
-  let chosen = byId.get(Number(j.task_id));
-  let override = null;
-
-  if (!chosen) {
-    // Hallucinated id.
-    chosen = heuristicPick(tasks, ctx);
-    override = 'model returned an unknown task id';
-  } else if (!fitsById.get(chosen.id) && payload.eligible_count > 0) {
-    // Hard constraints are not the model's call. If it picked something that
-    // does not fit while something does, that is a rule violation, not a
-    // judgment we defer to.
-    chosen = heuristicPick(tasks, ctx);
-    override = 'model picked a task that does not fit the current window or energy';
-  }
-
-  return {
-    task: chosen,
-    reasoning: override
-      ? `Chosen locally by fit and importance (${override}).`
-      : (j.reasoning || '').toString().trim() || 'Selected as the closest fit for your current window.',
-    mindset_primer: override ? '' : (j.mindset_primer || '').toString().trim(),
-    runner_up: byId.get(Number(j.runner_up_id)) || null,
-    deferred_note: override ? '' : (j.deferred_note || '').toString().trim(),
-    context: ctx,
-    source: result.source,
-    model: result.model,
-    fallback_used: !!override,
-    fallback_reason: override,
-  };
-}
-
-/**
- * A complete recommendation computed without any model. Same rules the prompt
- * states, applied directly.
- */
-function localRecommendation(tasks, ctx, scored, reason) {
-  const eligible = scored.filter((t) => t.fits);
-  const chosen = heuristicPick(tasks, ctx);
-  const runnerUp = eligible.length > 1
-    ? tasks.find((t) => t.id === eligible.find((e) => e.id !== chosen?.id)?.id)
-    : null;
-
-  const overwhelmed = ctx.energy_state === 'overwhelmed';
-  const why = !eligible.length
-    ? `Nothing fits ${ctx.available_minutes} minutes at ${ctx.energy_state} energy, so this is the closest match rather than a good one.`
-    : overwhelmed
-      ? 'Smallest thing that fits, because at overwhelmed energy recovery is the higher-value move.'
-      : `Highest-importance task that fits ${ctx.available_minutes} minutes at ${ctx.energy_state} energy.`;
-
-  return {
-    task: chosen,
-    reasoning: why,
+  // Locally-computed answer. Everything below only decorates this.
+  const result = {
+    task: top,
+    runner_up: runnerUp,
+    tier: ranked.tier,
+    tier_reason: ranked.tierReason,
+    reasoning: top.reasons.join(' '),
     mindset_primer: '',
-    runner_up: runnerUp || null,
-    deferred_note: '',
-    context: ctx,
+    deferred_note: defaultDeferredNote(ranked),
+    breakdown: top.breakdown,
+    slack: top.slack,
+    burnout: ranked.burnout,
+    income_at_risk: ranked.incomeAtRisk,
+    risks: ranked.risks,
+    waiting: ranked.waiting,
+    context: { energy_state: ranked.energyState, available_minutes: ranked.availableMinutes },
+    suggestions: ranked.suggestions,
     source: 'local',
-    model: null,
-    degraded: true,
-    degraded_reason: reason,
-    fallback_used: true,
-    fallback_reason: 'no model reachable; scored locally',
+    explained: false,
   };
+
+  // Phrasing is a nicety. If no model answers, the recommendation still stands.
+  try {
+    const payload = {
+      chosen: {
+        title: top.title, type: top.type,
+        minutes: top.effortMinutes, due: top.dueDate,
+        reasons: top.reasons,
+        score_factors: top.breakdown,
+        cannot_be_delivered: top.slack?.band === 'critical',
+        suppressed_for_income: !!top.suppressed,
+      },
+      runner_up: runnerUp ? runnerUp.title : null,
+      tier: ranked.tier,
+      tier_reason: ranked.tierReason,
+      energy: ranked.energyState,
+      minutes_available: ranked.availableMinutes,
+      burnout_band: ranked.burnout.band,
+    };
+    const r = await oneShotJson({
+      system: EXPLAIN_SYSTEM,
+      user: JSON.stringify(payload, null, 2),
+      maxTokens: 400,
+      timeoutMs: 120_000,
+    });
+    const j = r.json || {};
+    if (j.reasoning) result.reasoning = String(j.reasoning).trim();
+    if (j.mindset_primer) result.mindset_primer = String(j.mindset_primer).trim();
+    if (j.deferred_note) result.deferred_note = String(j.deferred_note).trim();
+    result.source = r.source;
+    result.model = r.model;
+    result.explained = true;
+  } catch (err) {
+    // Expected whenever no backend is configured. Not an error worth surfacing.
+    console.error('[recommend] explanation unavailable, using local reasons:', err.message);
+  }
+
+  return result;
 }
 
-/** Deterministic backup if the model returns an unusable id. */
-function heuristicPick(tasks, ctx) {
-  const maxEnergy = ENERGY_STATES[ctx.energy_state]?.max_task_energy ?? 3;
-  const fits = tasks.filter(
-    (t) => (t.time_minutes ?? 30) <= ctx.available_minutes
-        && (t.energy_required ?? 3) <= maxEnergy
-  );
-  const pool = fits.length ? fits : tasks;
-  return [...pool].sort(
-    (a, b) => (a.strategic_importance ?? 3) - (b.strategic_importance ?? 3)
-  )[0];
+/** Say what is being set aside, when something clearly is. */
+function defaultDeferredNote(ranked) {
+  if (ranked.tier === 'commitment_at_risk') {
+    return 'Everything else is on hold until this is delivered or renegotiated.';
+  }
+  const suppressed = ranked.suggestions.filter((s) => s.suppressed);
+  if (suppressed.length) {
+    return `${suppressed.length} thing${suppressed.length === 1 ? '' : 's'} you would enjoy ` +
+           `${suppressed.length === 1 ? 'is' : 'are'} being held back while a commitment is at risk.`;
+  }
+  return '';
 }
+
 
 /**
  * Map the importance label to our 1-5 column (1 = highest).
