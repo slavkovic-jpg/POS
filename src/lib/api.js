@@ -60,6 +60,34 @@ export const api = {
     ground: (id) => req(`/tasks/${id}/ground`, { method: 'POST' }),
     toggleSubtask: (id) => req(`/subtasks/${id}/toggle`, { method: 'POST' }),
   },
+  entities: {
+    schema: () => req('/entities/schema'),
+    list: (kind, params = {}) => {
+      const q = new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v != null && v !== '')
+      ).toString();
+      return req(`/e/${kind}` + (q ? `?${q}` : ''));
+    },
+    get: (kind, id) => req(`/e/${kind}/${id}`),
+    create: (kind, data) => req(`/e/${kind}`, { method: 'POST', body: data }),
+    update: (kind, id, patch) => req(`/e/${kind}/${id}`, { method: 'PATCH', body: patch }),
+    remove: (kind, id) => req(`/e/${kind}/${id}`, { method: 'DELETE' }),
+  },
+  inbox: {
+    promote: (id, target, fields = {}) =>
+      req(`/inbox/${id}/promote`, { method: 'POST', body: { target, fields } }),
+  },
+  ranking: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return req('/ranking' + (q ? `?${q}` : ''));
+  },
+  burnout: () => req('/burnout'),
+  weights: {
+    get: () => req('/weights'),
+    set: (patch) => req('/weights', { method: 'PATCH', body: patch }),
+    reset: () => req('/weights/reset', { method: 'POST' }),
+  },
+  events: (limit = 100) => req(`/events?limit=${limit}`),
   context: {
     get: () => req('/context'),
     set: (patch) => req('/context', { method: 'PATCH', body: patch }),

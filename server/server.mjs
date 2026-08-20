@@ -22,8 +22,14 @@ import { groundTask, getGrounding, groundingAvailable } from './grounding.mjs';
 import { testBackends } from './diagnostics.mjs';
 import { dashboardSummary } from './dashboard.mjs';
 import { loadWeights, setWeight, resetWeights, rankNow, currentBurnout } from './workspace.mjs';
+import * as tasksModule from './tasks.mjs';
+import {
+  ENTITIES, listEntities, getEntity, createEntity, updateEntity, deleteEntity,
+  promoteInbox, listEvents, registerTasksModule,
+} from './entities.mjs';
 
 migrate();
+registerTasksModule(tasksModule);
 
 const app = express();
 app.use(cors());
@@ -179,6 +185,74 @@ app.post('/api/subtasks/:id/toggle', (req, res) => {
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
+});
+
+// ---- Adopted entities --------------------------------------------------------
+// projects | commitments | inbox | ideas | dependencies — one shape, one router.
+// The schema for these existed for a while with no way to reach them, which
+// meant the weighting engine could rank commitments nobody could create.
+
+/** Field/enum metadata, so the UI builds its forms from the server's truth. */
+app.get('/api/entities/schema', (_req, res) => {
+  res.json(Object.fromEntries(Object.entries(ENTITIES).map(([k, s]) => [k, {
+    label: s.label, prefix: s.prefix, required: s.required,
+    fields: s.fields, immutable: s.immutable, enums: s.enums, defaults: s.defaults,
+  }])));
+});
+
+app.get('/api/events', (req, res) => res.json(listEvents({ limit: Number(req.query.limit) || 100 })));
+
+const ENTITY_KINDS = Object.keys(ENTITIES);
+function entityKind(req, res) {
+  if (!ENTITY_KINDS.includes(req.params.kind)) {
+    res.status(404).json({ error: `unknown entity: ${req.params.kind}` });
+    return null;
+  }
+  return req.params.kind;
+}
+
+app.get('/api/e/:kind', (req, res) => {
+  const kind = entityKind(req, res); if (!kind) return;
+  try {
+    res.json(listEntities(kind, {
+      status: req.query.status, project_id: req.query.project_id, limit: req.query.limit,
+    }));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/e/:kind/:id', (req, res) => {
+  const kind = entityKind(req, res); if (!kind) return;
+  const row = getEntity(kind, req.params.id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  res.json(row);
+});
+
+app.post('/api/e/:kind', (req, res) => {
+  const kind = entityKind(req, res); if (!kind) return;
+  try { res.json(createEntity(kind, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.patch('/api/e/:kind/:id', (req, res) => {
+  const kind = entityKind(req, res); if (!kind) return;
+  try { res.json(updateEntity(kind, req.params.id, req.body || {})); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.delete('/api/e/:kind/:id', (req, res) => {
+  const kind = entityKind(req, res); if (!kind) return;
+  try { deleteEntity(kind, req.params.id); res.json({ ok: true }); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Triage: a capture becomes whatever it turned out to be. The inbox row is
+// kept and marked, never deleted — the original words outlive the edit.
+app.post('/api/inbox/:id/promote', (req, res) => {
+  try {
+    const { target, fields } = req.body || {};
+    if (!target) return res.status(400).json({ error: 'target required' });
+    res.json(promoteInbox(req.params.id, target, fields || {}));
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 // ---- Scoring -----------------------------------------------------------------

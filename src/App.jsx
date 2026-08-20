@@ -3,6 +3,7 @@ import { NavLink, Route, Routes, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, Mic, MessageSquare, ListTodo, Sun, Compass,
   Brain, HelpCircle, CalendarCheck, TrendingUp, UserCog, Settings,
+  Inbox, FolderKanban, Handshake,
 } from 'lucide-react';
 
 import DashboardPage from './pages/DashboardPage.jsx';
@@ -17,6 +18,9 @@ import DecisionsPage from './pages/DecisionsPage.jsx';
 import ReviewsPage from './pages/ReviewsPage.jsx';
 import OnboardingPage from './pages/OnboardingPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
+import InboxPage from './pages/InboxPage.jsx';
+import ProjectsPage from './pages/ProjectsPage.jsx';
+import CommitmentsPage from './pages/CommitmentsPage.jsx';
 
 /** Grouped by what you're doing, not by which table it touches. */
 const NAV = [
@@ -24,8 +28,13 @@ const NAV = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/copilot',   label: 'Copilot',   icon: Mic },
     { to: '/chat',      label: 'Chat',      icon: MessageSquare },
+    { to: '/inbox',     label: 'Inbox',     icon: Inbox },
     { to: '/tasks',     label: 'Tasks',     icon: ListTodo },
     { to: '/briefing',  label: 'Briefing',  icon: Sun },
+  ]},
+  { section: 'Work', items: [
+    { to: '/projects',    label: 'Projects',    icon: FolderKanban },
+    { to: '/commitments', label: 'Commitments', icon: Handshake },
   ]},
   { section: 'Direction', items: [
     { to: '/strategy',  label: 'Strategy',       icon: Compass },
@@ -76,7 +85,10 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/copilot" element={<CopilotPage />} />
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/inbox" element={<InboxPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/commitments" element={<CommitmentsPage />} />
             <Route path="/briefing" element={<BriefingPage />} />
             <Route path="/strategy" element={<StrategyPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
