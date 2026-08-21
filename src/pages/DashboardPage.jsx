@@ -3,13 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Sparkles, Target, Zap, Clock, ListTodo, HelpCircle, CalendarCheck,
   Brain, AlertTriangle, ArrowRight, Timer, Layers, Globe, Check,
-  Compass, TrendingUp, Inbox, MessageSquare, Battery,
+  Compass, TrendingUp, Inbox, MessageSquare, Battery, Shuffle,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { ENERGY_META } from '../lib/domains.js';
 import { DomainBadge, HueScope, Stat, Callout, SectionHead } from '../components/ui.jsx';
 import FocusTimer from '../components/FocusTimer.jsx';
 import UnpackModal from '../components/UnpackModal.jsx';
+import RouteModal from '../components/RouteModal.jsx';
 
 const TIME_BLOCKS = [15, 30, 60, 120];
 
@@ -26,6 +27,7 @@ export default function DashboardPage() {
   const [recLoading, setRecLoading] = useState(false);
   const [dump, setDump] = useState('');
   const [unpackOpen, setUnpackOpen] = useState(false);
+  const [routeOpen, setRouteOpen] = useState(false);
   const [timerTask, setTimerTask] = useState(null);
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
@@ -211,10 +213,13 @@ export default function DashboardPage() {
             <MessageSquare size={11} />Talk instead
           </Link>} />
         <textarea rows={2} value={dump} onChange={(e) => setDump(e.target.value)}
-          placeholder="Write it messy — several things at once is fine. It gets pulled apart and scored, and you approve each one before anything is saved." />
+          placeholder="Write it messy — several things at once is fine. Tasks, promises, ideas, questions, things about you. It gets sorted, and nothing is saved until you agree." />
         <div className="row-flex" style={{ marginTop: 10, justifyContent: 'flex-end' }}>
-          <button onClick={() => setUnpackOpen(true)} disabled={!dump.trim()}>
-            <Sparkles size={13} />Unpack
+          <button className="ghost" onClick={() => setUnpackOpen(true)} disabled={!dump.trim()}>
+            <Sparkles size={13} />Tasks only
+          </button>
+          <button onClick={() => setRouteOpen(true)} disabled={!dump.trim()}>
+            <Shuffle size={13} />Sort it
           </button>
         </div>
       </div>
@@ -333,6 +338,8 @@ export default function DashboardPage() {
 
       <UnpackModal open={unpackOpen} text={dump} onClose={() => setUnpackOpen(false)}
         onSaved={(n) => { setDump(''); setToast(`Added ${n} task${n === 1 ? '' : 's'}.`); refresh(); }} />
+      <RouteModal open={routeOpen} initialText={dump} onClose={() => setRouteOpen(false)}
+        onFiled={(r) => { setDump(''); setToast(filedToast(r)); refresh(); }} />
       {timerTask && (
         <FocusTimer task={timerTask} onClose={() => setTimerTask(null)}
           onComplete={async () => { await completeTask(timerTask.id); setTimerTask(null); }} />
@@ -402,4 +409,20 @@ function buildNudges(d) {
   }
 
   return out.slice(0, 3);
+}
+
+/** "Filed 5: 2 tasks, 1 commitment, 2 ideas" — say where things actually went. */
+function filedToast(result) {
+  const written = result?.written || [];
+  if (!written.length) return 'Nothing filed.';
+  const counts = {};
+  for (const w of written) counts[w.destination] = (counts[w.destination] || 0) + 1;
+  const names = {
+    task: 'task', commitment: 'commitment', project: 'project', idea: 'idea',
+    knowledge: 'knowledge note', open_question: 'open question',
+    decision: 'decision', health_signal: 'health signal', unclear: 'left in inbox',
+  };
+  const parts = Object.entries(counts).map(([k, n]) =>
+    k === 'unclear' ? `${n} left in inbox` : `${n} ${names[k]}${n === 1 ? '' : 's'}`);
+  return `Filed ${written.length}: ${parts.join(', ')}.`;
 }

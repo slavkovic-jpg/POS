@@ -60,6 +60,13 @@ export const api = {
     ground: (id) => req(`/tasks/${id}/ground`, { method: 'POST' }),
     toggleSubtask: (id) => req(`/subtasks/${id}/toggle`, { method: 'POST' }),
   },
+  // Capture routing. `propose` writes nothing; `commit` is the only writer.
+  route: {
+    propose: (text) => req('/route', { method: 'POST', body: { text } }),
+    fromConversation: (limit) => req('/route/conversation', { method: 'POST', body: { limit } }),
+    commit: (items) => req('/route/commit', { method: 'POST', body: { items } }),
+    learned: () => req('/route/learned'),
+  },
   entities: {
     schema: () => req('/entities/schema'),
     list: (kind, params = {}) => {

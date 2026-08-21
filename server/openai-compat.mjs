@@ -111,6 +111,7 @@ export async function generateOpenAICompat({
 
   let delay = 1000;
   let lastError = null;
+  let errorRetried = false;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
@@ -159,11 +160,32 @@ export async function generateOpenAICompat({
 
     const data = await response.json();
     const text = (data?.choices?.[0]?.message?.content || '').trim();
+
+    // HTTP 200 with finish_reason "error" is the provider failing mid-stream,
+    // not the model answering. What comes back is a valid object followed by
+    // the start of a second one, which parses as nothing — and without this
+    // retry the whole batch degrades to rules and every item reads "unclear",
+    // which looks like the model being useless rather than one bad response.
+    // Once only: the failure is mostly input-shaped rather than transient, so
+    // a third and fourth identical request mostly buys latency. What survives
+    // it is the caller salvaging whatever parsed.
+    if (data?.choices?.[0]?.finish_reason === 'error' && !errorRetried && attempt < retries) {
+      errorRetried = true;
+      lastError = 'provider finish_reason=error';
+      await new Promise((r) => setTimeout(r, delay));
+      delay *= 2;
+      continue;
+    }
+
     return {
       text: text || '(no response)',
       source: 'hosted',
       model: data?.model || OPENAI_COMPAT_MODEL,
       usage: data?.usage,
+      // Carried so a parse failure downstream can say whether the JSON was
+      // malformed or simply cut off at the token limit. Those need opposite
+      // fixes and look identical in a 300-character preview.
+      finishReason: data?.choices?.[0]?.finish_reason || null,
     };
   }
 

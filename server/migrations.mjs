@@ -329,6 +329,18 @@ CREATE TABLE IF NOT EXISTS weights (
   value REAL NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- Routing corrections. Every time a proposed destination is changed at review,
+-- the correction is kept and fed back as a few-shot example. This is what makes
+-- "agree once and it holds" literal: agreement accumulates here rather than
+-- being re-litigated on every capture.
+CREATE TABLE IF NOT EXISTS routing_examples (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  text TEXT NOT NULL,
+  proposed TEXT,                 -- what the router said; NULL if it had no opinion
+  chosen TEXT NOT NULL,          -- what it should have been
+  created_at TEXT NOT NULL
+);
 `;
 
 // Tables that existed and earned their removal.

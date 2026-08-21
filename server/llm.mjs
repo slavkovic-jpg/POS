@@ -186,8 +186,22 @@ export async function oneShotJson(params) {
   const result = await oneShot(params);
   const parsed = tryParseJson(result.text);
   if (parsed === null) {
-    const preview = result.text.slice(0, 300);
-    throw new Error(`LLM did not return parseable JSON. First 300 chars: ${preview}`);
+    // Length and finish reason, because "unparseable" has two causes that need
+    // opposite fixes: the model wrote something that is not JSON, or it wrote
+    // valid JSON and was cut off at the token limit. A preview of the start
+    // looks identical either way.
+    const cut = result.finishReason === 'length' ? ' — CUT OFF at the token limit' : '';
+    const err = new Error(
+      `LLM did not return parseable JSON (${result.text.length} chars, ` +
+      `finish: ${result.finishReason || 'unknown'}${cut}). Ends: ` +
+      `...${result.text.slice(-160)}`
+    );
+    // Carried so a caller can salvage the part that did parse. A response that
+    // goes wrong halfway is usually two good records and then noise, and
+    // throwing the good ones away costs the user their capture.
+    err.rawText = result.text;
+    err.finishReason = result.finishReason || null;
+    throw err;
   }
   return { ...result, json: parsed };
 }

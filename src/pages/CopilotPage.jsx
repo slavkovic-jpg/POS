@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useSpeech } from '../lib/useSpeech.js';
+import { FolderInput } from 'lucide-react';
 import CaptureModal from '../components/CaptureModal.jsx';
+import RouteModal from '../components/RouteModal.jsx';
 
 /**
  * Voice-first conversation. Shares the chat_messages table with the Chat page
@@ -18,6 +20,7 @@ export default function CopilotPage() {
   const [thinking, setThinking] = useState(false);
   const [typed, setTyped] = useState('');
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [routeOpen, setRouteOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const scrollRef = useRef(null);
@@ -200,6 +203,13 @@ export default function CopilotPage() {
         <button className="ghost" onClick={() => setCaptureOpen(true)} disabled={messages.length === 0}>
           Capture
         </button>
+        {/* The assistant has no tools and never will, so it can describe a
+            filing plan perfectly and do nothing with it. This is how what was
+            agreed actually reaches the tables — same review screen, same
+            nothing-writes-unconfirmed rule. */}
+        <button onClick={() => setRouteOpen(true)} disabled={messages.length === 0}>
+          <FolderInput size={13} />File this
+        </button>
       </div>
 
       {showSettings && (
@@ -247,7 +257,30 @@ export default function CopilotPage() {
         onClose={() => setCaptureOpen(false)}
         onSaved={(n) => setToast(`Saved ${n} item${n === 1 ? '' : 's'}.`)}
       />
+      <RouteModal
+        open={routeOpen}
+        source="conversation"
+        onClose={() => setRouteOpen(false)}
+        onFiled={(r) => setToast(filedToast(r))}
+      />
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
+}
+
+/** Say where things actually went, not just how many. */
+function filedToast(result) {
+  const written = result?.written || [];
+  if (!written.length) return 'Nothing filed.';
+  const names = {
+    task: 'task', commitment: 'commitment', project: 'project', idea: 'idea',
+    dependency: 'dependency', knowledge: 'knowledge note',
+    open_question: 'open question', decision: 'decision',
+    health_signal: 'health signal', unclear: 'left in inbox',
+  };
+  const counts = {};
+  for (const w of written) counts[w.destination] = (counts[w.destination] || 0) + 1;
+  const parts = Object.entries(counts).map(([k, n]) =>
+    k === 'unclear' ? `${n} left in inbox` : `${n} ${names[k]}${n === 1 ? '' : 's'}`);
+  return `Filed ${written.length}: ${parts.join(', ')}.`;
 }

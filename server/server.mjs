@@ -22,6 +22,7 @@ import { groundTask, getGrounding, groundingAvailable } from './grounding.mjs';
 import { testBackends } from './diagnostics.mjs';
 import { FREE_PROVIDERS } from './openai-compat.mjs';
 import { dashboardSummary } from './dashboard.mjs';
+import { routeCapture, routeConversation, commitRoutes, learnedExamples, correctionStats } from './router.mjs';
 import { loadWeights, setWeight, resetWeights, rankNow, currentBurnout } from './workspace.mjs';
 import * as tasksModule from './tasks.mjs';
 import {
@@ -148,6 +149,37 @@ app.post('/api/tasks/accept', (req, res) => {
   if (!Array.isArray(tasks)) return res.status(400).json({ error: 'tasks array required' });
   res.json({ saved: acceptTasks(tasks) });
 });
+
+// --- Capture routing -------------------------------------------------------
+// /route proposes and writes NOTHING; /route/commit is the only writer, and it
+// only ever runs on what came back from the review screen.
+app.post('/api/route', async (req, res) => {
+  try {
+    res.json(await routeCapture(req.body?.text));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/route/commit', (req, res) => {
+  const { items } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'items array required' });
+  try {
+    res.json(commitRoutes(items));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// Extract what a conversation actually agreed on. Same review screen, same
+// no-write guarantee — the chat backend has no tools and is not getting any.
+app.post('/api/route/conversation', async (req, res) => {
+  try {
+    res.json(await routeConversation({ limit: Number(req.body?.limit) || 16 }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.get('/api/route/learned', (_req, res) =>
+  res.json({ examples: learnedExamples(50), stats: correctionStats() }));
 
 // Decision engine — the single best next action given current conditions
 app.get('/api/tasks/recommend', async (_req, res) => {
