@@ -6,7 +6,14 @@ async function req(path, opts = {}) {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    // Every server error handler here returns { error: "..." } with the real
+    // cause. Falling back to statusText alone turns every failure into an
+    // undiagnosable "500 Internal Server Error" — which is exactly what
+    // happened to the guide widget when a backend genuinely failed.
+    const body = await r.json().catch(() => null);
+    throw new Error(body?.error || `${r.status} ${r.statusText}`);
+  }
   return r.status === 204 ? null : r.json();
 }
 
@@ -14,10 +21,14 @@ export const api = {
   config: () => req('/config'),
   testBackends: () => req('/config/test'),
   dashboard: () => req('/dashboard'),
+  navStatus: (sinceMessageId = 0) => req('/nav-status' + (sinceMessageId ? `?since=${sinceMessageId}` : '')),
+  guide: {
+    ask: (question, history = []) => req('/guide/ask', { method: 'POST', body: { question, history } }),
+  },
+  calendar: (from, to) => req(`/calendar?from=${from}&to=${to}`),
   chat: {
     messages: () => req('/chat/messages'),
     send: (text, opts = {}) => req('/chat/send', { method: 'POST', body: { text, ...opts } }),
-    capture: (limit = 20) => req('/chat/capture', { method: 'POST', body: { limit } }),
   },
   strategy: {
     get: () => req('/strategy'),
@@ -102,6 +113,9 @@ export const api = {
   briefing: {
     today: () => req('/briefing/today'),
     update: (patch) => req('/briefing/today', { method: 'PATCH', body: patch }),
+    messages: () => req('/briefing/messages'),
+    chat: (text) => req('/briefing/chat', { method: 'POST', body: { text } }),
+    accept: (body) => req('/briefing/accept', { method: 'POST', body }),
   },
   onboarding: {
     profile: () => req('/onboarding/profile'),

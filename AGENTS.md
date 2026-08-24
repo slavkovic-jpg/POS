@@ -227,10 +227,45 @@ be caught by running the code. Each one below has already happened.
     reached by a different road. `cleanKeys()` runs on every model row,
     salvaged ones included.
 
+22. **"Unread" cannot live on only one side.** `navStatus(afterMessageId)`
+    (`server/dashboard.mjs`) answers "how many assistant replies came after
+    id X" — a real, server-checkable fact. What counts as *seen* is what a
+    particular browser has looked at, which the server has no way to know and
+    should not guess at; that lives in `localStorage['pos_last_seen_message_id']`,
+    advanced by `CopilotPage` as messages load and send. Neither side can move
+    this to the other without either losing accuracy (a client-only guess) or
+    inventing a session concept the app doesn't otherwise have (a server-only
+    "seen" flag). Any other "unread"-shaped badge should follow the same split.
+
+23. **"Never decide" is a rule about the ranking engine, not about refusing to
+    help someone write a sentence.** The guide widget's system prompt
+    (`server/guide.mjs`) stated the hard "you do not decide anything" rule
+    with nothing scoping it to task ranking specifically — a hosted model
+    generalised it to cover *any* open-ended request and refused to help
+    write a strategy field ("I can't decide what to write for you"), even
+    "give an example" and "ask me questions to figure it out." It answered
+    the same deflection three turns running. The fix was not softening the
+    rule, it was **scoping** it: `GUIDE_SYSTEM` now names two explicitly
+    different jobs — wayfinding (where the hard rule applies) and helping the
+    user think or write (where it doesn't apply at all, and refusing is the
+    bug). Any future instruction to a model that says "never decide" or
+    "never invent" needs to say what it must not decide, or a capable model
+    will find the most literal, most restrictive reading and generalise it
+    into refusing things it was never meant to refuse.
+
 ---
 
 ## Toolchain gotchas
 
+- **`toLocaleDateString(undefined, { day: 'numeric', year: 'numeric' })` —
+  day and year with no month — renders garbage in this environment**
+  (`"2026 (day: 23)"` instead of a date). `{ month, day }` and
+  `{ month, year }` both format fine; it's specifically the day+year-without-
+  month combination that breaks. Cheapest fix: never ask for that
+  combination — always include `month` in any `toLocaleDateString` call, and
+  build a `"month day – month day, year"` label from two calls rather than
+  one call with a `year`-only tail. Cost real time in `Timeline.jsx` before
+  the pattern was isolated.
 - **`node:sqlite` (`DatabaseSync`), not `better-sqlite3`.** The latter needs
   Visual Studio C++ build tools, which this machine does not have. Consequence:
   **there is no `db.transaction()`** — use explicit `BEGIN` / `COMMIT` /
@@ -313,6 +348,17 @@ be caught by running the code. Each one below has already happened.
 - **Trusting "configured" as "working".** Settings makes a real request per
   backend, because a key can be present and still be revoked, out of quota,
   regionally blocked, or scoped to the wrong model.
+- **A separate Chat page.** Retired — it shared `chat_messages` and
+  `api.chat.send` with Copilot and had no capability Copilot lacked (no voice,
+  no mode switch, no File this). `/chat` redirects to `/copilot`. Do not
+  re-add a second conversation surface without a capability Copilot genuinely
+  cannot have.
+- **The Capture button/modal (`server/capture.mjs`, `CAPTURE_SCHEMA`).**
+  Retired — it extracted only 3 of the 10 destinations `routeConversation()`
+  ("File this") already covers, with none of File this's project/commitment
+  linking or duplicate detection. Two review screens over the same
+  conversation, one a strict subset of the other, was the actual problem —
+  not that the labels needed disambiguating.
 
 ---
 

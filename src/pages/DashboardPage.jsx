@@ -8,6 +8,9 @@ import {
 import { api } from '../lib/api.js';
 import { ENERGY_META } from '../lib/domains.js';
 import { DomainBadge, HueScope, Stat, Callout, SectionHead } from '../components/ui.jsx';
+import SectionTabs from '../components/SectionTabs.jsx';
+import GuideWidget from '../components/GuideWidget.jsx';
+import Timeline from '../components/Timeline.jsx';
 import FocusTimer from '../components/FocusTimer.jsx';
 import UnpackModal from '../components/UnpackModal.jsx';
 import RouteModal from '../components/RouteModal.jsx';
@@ -88,6 +91,22 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* Docked at the very top, above the section tabs — the calendar is
+          the one thing worth seeing before anything else scrolls past. */}
+      <Timeline scope="all" />
+
+      <SectionTabs sections={[
+        { id: 'conditions', label: 'Right now', icon: Zap },
+        { id: 'recommend', label: 'Decide', icon: Target },
+        { id: 'guide', label: 'Guide', icon: Compass },
+        { id: 'capture', label: 'Get it out', icon: Inbox },
+        { id: 'doable', label: 'Fits now', icon: ListTodo,
+          badge: { count: d.tasks.doable_count, tone: d.tasks.doable_count > 0 ? 'warn' : 'neutral' } },
+        { id: 'open-questions', label: 'Questions', icon: HelpCircle,
+          badge: d.questions.open_count > 0 ? { count: d.questions.open_count, tone: 'warn' } : null },
+        { id: 'balance', label: 'Life balance', icon: Compass },
+      ]} />
+
       {nudges.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           {nudges.map((n) => (
@@ -101,7 +120,7 @@ export default function DashboardPage() {
 
       {/* ---- Conditions + decision engine ---- */}
       <div className="grid-2">
-        <div className="panel">
+        <div id="conditions" className="panel">
           <SectionHead icon={Zap} title="Right now" />
           <label>Energy</label>
           <div className="segmented">
@@ -140,7 +159,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="panel hero">
+        <div id="recommend" className="panel hero">
           <SectionHead icon={Target} title="What should I do now?"
             action={<button onClick={recommend} disabled={recLoading}>
               {recLoading ? 'Deciding…' : rec ? 'Re-evaluate' : 'Decide'}
@@ -207,7 +226,12 @@ export default function DashboardPage() {
       </div>
 
       {/* ---- Capture ---- */}
-      <div className="panel">
+      <div id="guide" className="panel">
+        <SectionHead icon={Compass} title="Guide" />
+        <GuideWidget />
+      </div>
+
+      <div id="capture" className="panel">
         <SectionHead icon={Inbox} title="Get it out of your head"
           action={<Link to="/copilot" className="badge" style={{ padding: '6px 11px' }}>
             <MessageSquare size={11} />Talk instead
@@ -226,7 +250,7 @@ export default function DashboardPage() {
 
       {/* ---- Doable now + open questions ---- */}
       <div className="grid-2">
-        <div className="panel">
+        <div id="doable" className="panel">
           <SectionHead icon={ListTodo} title={`Fits right now (${d.tasks.doable_count})`}
             action={<Link to="/tasks" className="item-meta">All tasks →</Link>} />
           {d.tasks.doable.length === 0 ? (
@@ -279,7 +303,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className="panel">
+        <div id="open-questions" className="panel">
           <SectionHead icon={HelpCircle} title={`Open questions (${d.questions.open_count})`}
             action={<Link to="/questions" className="item-meta">All →</Link>} />
           {d.questions.open.length === 0 ? (
@@ -306,7 +330,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ---- Life balance ---- */}
-      <div className="panel">
+      <div id="balance" className="panel">
         <SectionHead icon={Compass} title="Life balance"
           action={<Link to="/strategy" className="item-meta">Strategy scaffold →</Link>} />
         <div className="stat-grid" style={{ marginBottom: 18 }}>

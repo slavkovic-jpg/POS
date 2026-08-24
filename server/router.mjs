@@ -502,7 +502,7 @@ function pickModelItem(modelItems, fragment, i) {
 
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-function buildItem(fragment, rule, m, ctx = EMPTY_CONTEXT) {
+export function buildItem(fragment, rule, m, ctx = EMPTY_CONTEXT) {
   const modelDest = m && DESTINATIONS.includes(m.destination) ? m.destination : null;
 
   // No model opinion → the rule, or an honest "unclear".
@@ -528,8 +528,14 @@ function buildItem(fragment, rule, m, ctx = EMPTY_CONTEXT) {
   const linked = resolveRef(pool, m?.existing_id);
 
   // The model missing a duplicate and the word-overlap check missing one are
-  // different failures, so both run. Neither decides: a match the model did not
-  // make is offered on the review screen and left unset.
+  // different failures, so both run. A fuzzy match is offered and left unset —
+  // a coincidence of wording is a question, not an answer. An EXACT name match
+  // (score 1 — same content words, nothing more, nothing less) is not a guess;
+  // it is the same title. Left unset, that case duplicates a project on every
+  // "File this" that doesn't stop to read the small print under the row —
+  // which is what pressing File this usually means. Pre-selecting it keeps the
+  // review gate intact (still shown, still one click to undo via "file as
+  // new") while making the default match reality instead of assuming a new row.
   let duplicate = null;
   if (linked) {
     duplicate = { id: linked.id, name: linked.name, by: 'model' };
@@ -540,7 +546,10 @@ function buildItem(fragment, rule, m, ctx = EMPTY_CONTEXT) {
     // that already exists otherwise becomes a second copy of it, and the work
     // then splits across two containers that never appear together.
     const near = nearestMatch(pool, fields.title || fragment);
-    if (near) duplicate = { id: near.id, name: near.name, score: near.score, by: 'match' };
+    if (near) {
+      duplicate = { id: near.id, name: near.name, score: near.score, by: 'match' };
+      if (near.score === 1) fields.existing_id = near.id;
+    }
   }
 
   // A date the scorer cannot read is worse than no date: it looks set, and it

@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 
 /**
  * Review gate for the brain dump. The model proposes scored tasks; nothing is
- * written until you approve. Same contract as CaptureModal — the LLM never
+ * written until you approve. Same contract as RouteModal — the LLM never
  * writes to the database on its own.
  */
 export default function UnpackModal({ open, text, onClose, onSaved }) {

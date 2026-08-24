@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { Callout, SectionHead } from '../components/ui.jsx';
+import SectionTabs from '../components/SectionTabs.jsx';
 
 /**
  * Triage. Everything captured lands here first and stays raw until you decide
@@ -64,7 +65,13 @@ export default function InboxPage() {
 
       {error && <Callout tone="danger" icon={AlertTriangle} title="Problem">{error}</Callout>}
 
-      <div className="panel">
+      <SectionTabs sections={[
+        { id: 'capture', label: 'Capture', icon: InboxIcon },
+        { id: 'triage', label: 'To triage', icon: InboxIcon,
+          badge: pending > 0 ? { count: pending, tone: 'warn' } : null },
+      ]} />
+
+      <div id="capture" className="panel">
         <SectionHead icon={InboxIcon} title="Capture" />
         <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) capture(); }}
@@ -77,7 +84,7 @@ export default function InboxPage() {
         </div>
       </div>
 
-      <div className="panel">
+      <div id="triage" className="panel">
         <SectionHead icon={InboxIcon} title={`To triage (${pending})`}
           action={<button className={'pill' + (showDone ? ' active' : '')}
             onClick={() => setShowDone((v) => !v)}>Show processed</button>} />

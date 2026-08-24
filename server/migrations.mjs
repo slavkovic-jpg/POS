@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS briefings (
   created_at TEXT NOT NULL
 );
 
+-- The briefing conversation. Its own table, not chat_messages — reusing the
+-- Copilot thread would interleave a two-minute morning check-in with whatever
+-- else that thread is about, and routeConversation() reads recent
+-- chat_messages, which would pull briefing small talk into "File this" on an
+-- unrelated page.
+CREATE TABLE IF NOT EXISTS briefing_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  briefing_date TEXT NOT NULL,                -- YYYY-MM-DD, matches briefings.date
+  role TEXT NOT NULL,                         -- user|assistant
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 -- Weekly + monthly reviews
 CREATE TABLE IF NOT EXISTS reviews (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,6 +354,24 @@ CREATE TABLE IF NOT EXISTS routing_examples (
   chosen TEXT NOT NULL,          -- what it should have been
   created_at TEXT NOT NULL
 );
+
+-- Full-text index over knowledge, so buildSystemPrompt() can retrieve rows
+-- relevant to the current question instead of dumping the whole table.
+-- External-content table (no copy of the text) kept in sync by triggers below.
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+  category, content, content=knowledge, content_rowid=id
+);
+
+CREATE TRIGGER IF NOT EXISTS knowledge_ai AFTER INSERT ON knowledge BEGIN
+  INSERT INTO knowledge_fts(rowid, category, content) VALUES (new.id, new.category, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS knowledge_ad AFTER DELETE ON knowledge BEGIN
+  INSERT INTO knowledge_fts(knowledge_fts, rowid, category, content) VALUES ('delete', old.id, old.category, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS knowledge_au AFTER UPDATE ON knowledge BEGIN
+  INSERT INTO knowledge_fts(knowledge_fts, rowid, category, content) VALUES ('delete', old.id, old.category, old.content);
+  INSERT INTO knowledge_fts(rowid, category, content) VALUES (new.id, new.category, new.content);
+END;
 `;
 
 // Tables that existed and earned their removal.
@@ -372,6 +403,21 @@ const addedColumns = [
 
   // Six memory layers, folded into the store that is actually used.
   ['knowledge', 'layer', "TEXT DEFAULT 'personal'"],     // temporary|operational|strategic|behavioral|personal|decision
+
+  // When this is actually placed in the day, for the calendar's day/hour view.
+  // Distinct from due_date the same way effort_remaining_minutes is distinct
+  // from time_minutes (AGENTS.md invariant 2): due_date is deadline pressure
+  // and feeds slackFor; scheduled_at is where you've put it on the clock, and
+  // feeds nothing in the scorer. ISO datetime, e.g. "2026-09-01T09:30".
+  ['tasks', 'scheduled_at', 'TEXT'],
+
+  // The accepted plan — an ordered JSON array of {task_id, title, time_label,
+  // note}, not free text. task_id is a real row id resolved server-side
+  // before this is written; the model only ever sees a short reference for
+  // it (AGENTS.md invariant 20), never the raw id. The old `plan` column is
+  // left as-is rather than repurposed: its existing rows are plain strings,
+  // and reinterpreting them as JSON would break on read.
+  ['briefings', 'plan_json', 'TEXT'],
 ];
 
 // `satisfaction` already exists on tasks and has never been read by anything.
@@ -419,7 +465,20 @@ export function migrate() {
   seedStrategyRow();
   seedProfileRow();
   seedWeights();
+  backfillKnowledgeFts();
   console.log('[migrate] schema up to date');
+}
+
+// The triggers keep knowledge_fts in sync going forward, but an
+// external-content FTS table is never auto-populated for rows that already
+// existed when the virtual table was created — that needs an explicit rebuild.
+function backfillKnowledgeFts() {
+  const { n: indexed } = db.prepare('SELECT COUNT(*) AS n FROM knowledge_fts').get();
+  const { n: rows } = db.prepare('SELECT COUNT(*) AS n FROM knowledge').get();
+  if (indexed === 0 && rows > 0) {
+    db.exec(`INSERT INTO knowledge_fts(knowledge_fts) VALUES ('rebuild')`);
+    console.log('[migrate] rebuilt knowledge_fts index');
+  }
 }
 
 function dropRetiredTables() {

@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { DomainBadge, HueScope, Callout, SectionHead } from '../components/ui.jsx';
+import SectionTabs from '../components/SectionTabs.jsx';
+import { useHashFlash } from '../lib/useHashFlash.js';
 
 /**
  * Projects group work and give commitments something to hang off. A task with
@@ -26,6 +28,7 @@ export default function ProjectsPage() {
   const [showClosed, setShowClosed] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  const [loaded, setLoaded] = useState(false);
 
   async function refresh() {
     const [p, c, t, s] = await Promise.all([
@@ -36,7 +39,10 @@ export default function ProjectsPage() {
     ]);
     setProjects(p); setCommitments(c); setTasks(t); setDomains(s.domains);
   }
-  useEffect(() => { refresh().catch((e) => setError(e.message)); }, []);
+  useEffect(() => {
+    refresh().catch((e) => setError(e.message)).finally(() => setLoaded(true));
+  }, []);
+  useHashFlash(loaded);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3000);
@@ -45,6 +51,8 @@ export default function ProjectsPage() {
 
   const visible = projects.filter((p) =>
     showClosed || !['archived', 'completed'].includes(p.status));
+  const activeCount = projects.filter((p) => p.status === 'active').length;
+  const stalledCount = projects.filter((p) => ['waiting', 'blocked'].includes(p.status)).length;
 
   return (
     <div>
@@ -58,7 +66,13 @@ export default function ProjectsPage() {
 
       {error && <Callout tone="danger" icon={AlertTriangle} title="Problem">{error}</Callout>}
 
-      <div className="panel">
+      <SectionTabs sections={[
+        { id: 'add', label: 'Add a project', icon: Plus },
+        { id: 'list', label: 'Projects', icon: FolderKanban,
+          badge: { count: activeCount, tone: stalledCount > 0 ? 'warn' : 'neutral' } },
+      ]} />
+
+      <div id="add" className="panel">
         <SectionHead icon={Plus} title="Add a project"
           action={<button className="ghost" onClick={() => setAdding((v) => !v)}>
             {adding ? 'Cancel' : 'New'}
@@ -71,7 +85,7 @@ export default function ProjectsPage() {
         )}
       </div>
 
-      <div className="panel">
+      <div id="list" className="panel">
         <SectionHead icon={FolderKanban} title={`Projects (${visible.length})`}
           action={<button className={'pill' + (showClosed ? ' active' : '')}
             onClick={() => setShowClosed((v) => !v)}>Show closed</button>} />
@@ -192,7 +206,7 @@ function ProjectCard({ p, commitments, tasks, domains, onChanged, onToast, onErr
   }
 
   return (
-    <HueScope domainKey={p.domain_key} className="task-card">
+    <HueScope id={`project-${p.id}`} domainKey={p.domain_key} className="task-card">
       <div className="row-flex" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 560, fontSize: 15 }}>{p.name}</div>

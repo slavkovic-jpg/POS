@@ -12,16 +12,20 @@ import { listDecisions, addDecision, reviewDecision } from './decisions.mjs';
 import { listTasks, allTasks, getTask, addTask, updateTask, deleteTask, procrastinationCandidates, taskStats } from './tasks.mjs';
 import { getContext, setContext } from './context-state.mjs';
 import { unpackThoughts, acceptTasks, breakdownTask, listSubtasks, toggleSubtask, recommendNext } from './task-ai.mjs';
-import { getOrCreateTodayBriefing, updateBriefing } from './briefing.mjs';
+import {
+  getOrCreateTodayBriefing, updateBriefing, listBriefingMessages,
+  briefingChat, acceptBriefingPlan,
+} from './briefing.mjs';
 import { getProfile, updateProfile, completeOnboarding, analyzeCv, acceptHypotheses } from './onboarding.mjs';
 import { listReviews, getReview, startReview, updateReview, generateReview, gatherActivity } from './review.mjs';
-import { captureFromConversation } from './capture.mjs';
 import { backendStatus } from './llm.mjs';
 import { MODES } from './context.mjs';
 import { groundTask, getGrounding, groundingAvailable } from './grounding.mjs';
 import { testBackends } from './diagnostics.mjs';
 import { FREE_PROVIDERS } from './openai-compat.mjs';
-import { dashboardSummary } from './dashboard.mjs';
+import { dashboardSummary, navStatus } from './dashboard.mjs';
+import { askGuide } from './guide.mjs';
+import { calendarEvents } from './calendar.mjs';
 import { routeCapture, routeConversation, commitRoutes, learnedExamples, correctionStats } from './router.mjs';
 import { loadWeights, setWeight, resetWeights, rankNow, currentBurnout } from './workspace.mjs';
 import * as tasksModule from './tasks.mjs';
@@ -65,19 +69,28 @@ app.get('/api/config/test', async (_req, res) => {
 
 // ---- Dashboard --------------------------------------------------------------
 app.get('/api/dashboard', (_req, res) => res.json(dashboardSummary()));
+// The sidebar's badges. Deliberately separate from /api/dashboard — polled on
+// an interval, and should not drag ranked suggestions and the waiting list
+// along with it every 30 seconds.
+app.get('/api/nav-status', (req, res) => res.json(navStatus(Number(req.query.since) || 0)));
+
+// Wayfinding guide widget — phrases, never ranks. See server/guide.mjs.
+app.post('/api/guide/ask', async (req, res) => {
+  const question = req.body?.question;
+  if (!question?.trim()) return res.status(400).json({ error: 'question required' });
+  try { res.json(await askGuide(question, req.body?.history || [])); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// The zoomable calendar's one feed — everything with a date, normalized.
+app.get('/api/calendar', (req, res) => {
+  try { res.json(calendarEvents({ from: req.query.from, to: req.query.to })); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ---- Chat ------------------------------------------------------------------
 app.get('/api/chat/messages', (_req, res) => res.json(recentMessages(100)));
 app.delete('/api/chat/messages', (_req, res) => res.json(clearMessages()));
-app.post('/api/chat/capture', async (req, res) => {
-  try {
-    const limit = Math.max(2, Math.min(50, Number(req.body?.limit) || 20));
-    const result = await captureFromConversation({ limit });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 app.post('/api/chat/send', async (req, res) => {
   const { text, mode, spoken } = req.body || {};
   if (!text?.trim()) return res.status(400).json({ error: 'text required' });
@@ -324,6 +337,19 @@ app.patch('/api/context', (req, res) => {
 // ---- Briefing --------------------------------------------------------------
 app.get('/api/briefing/today', (_req, res) => res.json(getOrCreateTodayBriefing()));
 app.patch('/api/briefing/today', (req, res) => res.json(updateBriefing(req.body || {})));
+app.get('/api/briefing/messages', (_req, res) => res.json(listBriefingMessages()));
+app.post('/api/briefing/chat', async (req, res) => {
+  const text = req.body?.text;
+  if (!text?.trim()) return res.status(400).json({ error: 'text required' });
+  try { res.json(await briefingChat(text)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+// The only writer for the briefing plan — everything above proposes, nothing
+// above writes (AGENTS.md #5).
+app.post('/api/briefing/accept', (req, res) => {
+  try { res.json(acceptBriefingPlan(req.body || {})); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ---- Onboarding ------------------------------------------------------------
 app.get('/api/onboarding/profile', (_req, res) => res.json(getProfile()));

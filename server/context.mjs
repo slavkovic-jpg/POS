@@ -1,5 +1,5 @@
 import { getStrategy } from './strategy.mjs';
-import { listKnowledge } from './knowledge.mjs';
+import { listKnowledge, searchKnowledge } from './knowledge.mjs';
 import { listOpenQuestions } from './open-questions.mjs';
 import { listTasks } from './tasks.mjs';
 import { getContext, ENERGY_STATES } from './context-state.mjs';
@@ -75,7 +75,7 @@ The user is unloading. Your job is to CAPTURE, not to solve.
 - Ask "what else?" more often than any other question. Keep going until they say
   they are done.
 - Do not evaluate, rank, or organise out loud. That happens later, when they hit
-  Capture.
+  File this.
 - Keep every response under three sentences. You are the smaller voice here.`,
   },
   coach: {
@@ -118,9 +118,17 @@ Write it exactly as you would say it out loud to someone across a table:
 - Plain words and contractions. Never speak a URL, file path, or id aloud.
 - End on a question or a clear stop, so they know it is their turn.`;
 
-export function buildSystemPrompt({ mode = 'advisor', spoken = false } = {}) {
+// Cap regardless of how the knowledge table grows — retrieval is the point.
+const KNOWLEDGE_LIMIT = 20;
+
+export function buildSystemPrompt({ mode = 'advisor', spoken = false, question = '' } = {}) {
   const s = getStrategy();
-  const knowledge = listKnowledge();
+  // A matched-to-the-question set when there's a question to match against;
+  // otherwise the highest-confidence rows, still capped. Either way the
+  // prompt's knowledge section stays a fixed size as the table grows.
+  const knowledge = question
+    ? searchKnowledge(question, KNOWLEDGE_LIMIT)
+    : listKnowledge().slice(0, KNOWLEDGE_LIMIT);
   const openQs = listOpenQuestions();
 
   const sections = [PRINCIPLES];

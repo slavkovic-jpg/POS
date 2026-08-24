@@ -13,7 +13,7 @@ const { salvageItems } = await import('../server/schemas.mjs');
 const {
   splitFragments, preClassify, commitRoutes, BLAST_RADIUS,
   recordCorrection, learnedExamples, normalizeDate,
-  routingContext, resolveRef, similarity, nearestMatch, cleanKeys,
+  routingContext, resolveRef, similarity, nearestMatch, cleanKeys, buildItem,
 } = await import('../server/router.mjs');
 const { db } = await import('../server/db.mjs');
 const { slackFor, parseDateLoose } = await import('../server/scoring.mjs');
@@ -375,6 +375,40 @@ test('a re-worded promise is recognised; an unrelated one is not', () => {
 test('one shared word is a coincidence, not a duplicate', () => {
   assert.equal(similarity('Invoice Acme', 'Invoice Bergman'), 0);
   assert.ok(similarity('Send the Q3 model to Sarah', 'Send Sarah the Q3 model') > 0.9);
+});
+
+test('an exact-name project match auto-links instead of duplicating on File this', () => {
+  // Reproduces a reported bug: a fragment classified as `project` whose title
+  // exactly matches one already in ctx used to need a manual "update that
+  // one" click on the review screen to avoid creating a second row — the
+  // model rarely names a link itself for this shape (a status update on the
+  // project itself, not a task under it), and a fuzzy match is deliberately
+  // left for the user to confirm. But an EXACT title match is not a guess,
+  // and pressing "File this" without noticing the small-print suggestion
+  // duplicated the project every time.
+  const { written } = commitRoutes([
+    { text: 'Q3 investor deck', destination: 'project', proposed: 'project',
+      confidence: 'high', fields: { title: 'Q3 investor deck' } },
+  ]);
+  const projectId = written[0].id;
+
+  const ctx = routingContext();
+  const item = buildItem(
+    'Q3 investor deck is basically done, deadline moved to Friday',
+    null,
+    { text: 'Q3 investor deck is basically done, deadline moved to Friday',
+      destination: 'project', confidence: 'high', why: 'status update',
+      title: 'Q3 investor deck' },
+    ctx,
+  );
+  assert.equal(item.fields.existing_id, projectId, 'the exact match pre-selects the existing row');
+  assert.equal(item.duplicate.id, projectId);
+
+  const before = countOf('projects');
+  const again = commitRoutes([item]).written[0];
+  assert.equal(countOf('projects'), before, 'no second project for the same name');
+  assert.equal(again.id, projectId);
+  assert.equal(again.updated, true);
 });
 
 // ---------------------------------------------------------------------------

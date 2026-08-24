@@ -45,7 +45,7 @@ export const WRITABLE_TASK_FIELDS = [
   'title', 'notes', 'rationale', 'domain_key', 'status',
   'difficulty', 'engagement', 'satisfaction', 'strategic_importance',
   'energy_required', 'anxiety_level', 'time_minutes', 'learning_value',
-  'due_date',
+  'due_date', 'scheduled_at',
   // Merged in from ExecAgent
   'project_id', 'action_type', 'definition_of_done', 'blocked_by', 'source_ref',
   // The weighting dimensions

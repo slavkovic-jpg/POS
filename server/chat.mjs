@@ -116,7 +116,7 @@ function buildMessageHistory(userText, { spoken = false } = {}) {
 // ---- Hosted OpenAI-compatible responder (free tiers; fast) ---------------
 async function respondHosted(userText, opts) {
   const result = await generateOpenAICompat({
-    system: buildSystemPrompt(opts),
+    system: buildSystemPrompt({ ...opts, question: userText }),
     messages: buildMessageHistory(userText, { spoken: opts?.spoken }),
     maxTokens: opts?.spoken ? 700 : 2048,
   });
@@ -129,7 +129,7 @@ async function respondOllama(userText, opts) {
   if (!OLLAMA_ENABLED) return null;
 
   const messages = [
-    { role: 'system', content: buildSystemPrompt(opts) },
+    { role: 'system', content: buildSystemPrompt({ ...opts, question: userText }) },
     ...buildMessageHistory(userText, { spoken: opts?.spoken }),
   ];
 
@@ -186,7 +186,7 @@ async function respondOllama(userText, opts) {
 // ---- Gemini-backed responder (fast; good for voice) ----------------------
 async function respondGemini(userText, opts) {
   const result = await generateGemini({
-    system: buildSystemPrompt(opts),
+    system: buildSystemPrompt({ ...opts, question: userText }),
     messages: buildMessageHistory(userText, { spoken: opts?.spoken }),
     maxTokens: opts?.spoken ? 700 : 2048,
   });
@@ -205,7 +205,7 @@ async function respondClaude(userText, opts) {
     // punishing to listen to.
     max_tokens: opts?.spoken ? 700 : 2048,
     thinking: { type: 'adaptive' },
-    system: buildSystemPrompt(opts),
+    system: buildSystemPrompt({ ...opts, question: userText }),
     messages: buildMessageHistory(userText, { spoken: opts?.spoken }),
   });
 

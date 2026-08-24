@@ -8,8 +8,11 @@ import {
 import { api } from '../lib/api.js';
 import { ENERGY_META, domainMeta } from '../lib/domains.js';
 import { DomainBadge, HueScope, Stat, SectionHead, Callout } from '../components/ui.jsx';
+import SectionTabs from '../components/SectionTabs.jsx';
 import FocusTimer from '../components/FocusTimer.jsx';
 import UnpackModal from '../components/UnpackModal.jsx';
+import { useHashFlash } from '../lib/useHashFlash.js';
+import Timeline from '../components/Timeline.jsx';
 
 const TIME_BLOCKS = [15, 30, 60, 120];
 
@@ -20,6 +23,7 @@ export default function TasksPage() {
   const [filter, setFilter] = useState('');
   const [showDone, setShowDone] = useState(false);
   const [stats, setStats] = useState(null);
+  const [navStatus, setNavStatus] = useState(null);
 
   const [dump, setDump] = useState('');
   const [unpackOpen, setUnpackOpen] = useState(false);
@@ -40,14 +44,16 @@ export default function TasksPage() {
   const [config, setConfig] = useState(null);
 
   async function refresh() {
-    const [t, c, s] = await Promise.all([
+    const [t, c, s, ns] = await Promise.all([
       api.tasks.list(showDone ? { all: 'true' } : {}),
       api.context.get(),
       api.tasks.stats(),
+      api.navStatus(),
     ]);
     setTasks(t);
     setCtx(c);
     setStats(s);
+    setNavStatus(ns);
   }
 
   useEffect(() => {
@@ -75,6 +81,8 @@ export default function TasksPage() {
     [tasks, filter]
   );
 
+  useHashFlash(!!ctx);
+
   if (!ctx) return <div className="empty">Loading…</div>;
 
   const energyStates = Object.entries(ctx.energy_states || {});
@@ -91,8 +99,23 @@ export default function TasksPage() {
         </p>
       </div>
 
+      <Timeline scope="tasks" />
+
+      <SectionTabs sections={[
+        { id: 'dump', label: 'Brain dump', icon: Inbox },
+        { id: 'conditions', label: 'Conditions', icon: Zap },
+        { id: 'decide', label: 'Decide', icon: Target },
+        { id: 'task-list', label: showDone ? 'All tasks' : 'Open tasks', icon: ListTodo,
+          badge: navStatus && (navStatus.tasks.due_today > 0 || navStatus.tasks.overdue > 0)
+            ? { count: navStatus.tasks.done_today, total: Math.max(navStatus.tasks.due_today, navStatus.tasks.done_today),
+                tone: navStatus.tasks.overdue > 0 ? 'danger' : 'warn' }
+            : null },
+        { id: 'cognitive-load', label: 'Cognitive load', icon: Compass,
+          badge: stats?.totals.high_dread > 0 ? { count: stats.totals.high_dread, tone: 'warn' } : null },
+      ]} />
+
       {/* Brain dump */}
-      <div className="panel">
+      <div id="dump" className="panel">
         <h2><Inbox size={15} />Brain dump</h2>
         <p style={{ color: 'var(--text-dim)', margin: '0 0 10px' }}>
           Write it messy. One dump can contain several tasks — they get pulled apart, scored, and
@@ -110,7 +133,7 @@ export default function TasksPage() {
       </div>
 
       {/* Current conditions */}
-      <div className="panel">
+      <div id="conditions" className="panel">
         <h2><Zap size={15} />Current conditions</h2>
         <label>Energy right now</label>
         <div className="segmented">
@@ -148,7 +171,7 @@ export default function TasksPage() {
       </div>
 
       {/* Decision engine */}
-      <div className="panel" style={{ borderColor: rec ? 'var(--accent)' : 'var(--border)' }}>
+      <div id="decide" className="panel" style={{ borderColor: rec ? 'var(--accent)' : 'var(--border)' }}>
         <div className="row-flex" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
           <h2 style={{ margin: 0 }}><Target size={15} />What should I do now?</h2>
           <button onClick={recommend} disabled={recLoading}>
@@ -219,7 +242,7 @@ export default function TasksPage() {
       </div>
 
       {/* Task list */}
-      <div className="panel">
+      <div id="task-list" className="panel">
         <div className="row-flex" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ margin: 0 }}>
             {showDone ? 'All tasks' : 'Open tasks'} ({visible.length})
@@ -248,6 +271,7 @@ export default function TasksPage() {
               <TaskCard
                 key={t.id}
                 task={t}
+                domains={domains}
                 onChanged={refresh}
                 onTimer={() => setTimerTask(t)}
                 onToast={setToast}
@@ -258,7 +282,6 @@ export default function TasksPage() {
         )}
       </div>
 
-      {/* Cognitive load */}
       {stats && <CognitiveLoad stats={stats} />}
 
       <UnpackModal
@@ -288,12 +311,18 @@ export default function TasksPage() {
  * Web. They map onto the three reasons a task stalls — you can't start, it's
  * too big, or you don't know enough yet.
  */
-function TaskCard({ task, onChanged, onTimer, onToast, groundingAvailable }) {
+function TaskCard({ task, domains, onChanged, onTimer, onToast, groundingAvailable }) {
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [projects, setProjects] = useState([]);
   const [detail, setDetail] = useState(null);
   const [breaking, setBreaking] = useState(false);
   const [grounding, setGrounding] = useState(false);
   const done = task.status === 'done';
+
+  useEffect(() => {
+    if (editing) api.entities.list('projects').then(setProjects).catch(() => {});
+  }, [editing]);
 
   const subtasks = detail?.subtasks ?? null;
   const research = detail?.grounding ?? null;
@@ -350,8 +379,19 @@ function TaskCard({ task, onChanged, onTimer, onToast, groundingAvailable }) {
     onChanged();
   }
 
+  if (editing) {
+    return (
+      <div id={`task-${task.id}`} className="task-card">
+        <TaskForm task={task} domains={domains} projects={projects}
+          onCancel={() => setEditing(false)}
+          onSaved={() => { setEditing(false); onToast?.('Updated.'); onChanged(); }}
+          onError={(msg) => onToast?.(msg)} />
+      </div>
+    );
+  }
+
   return (
-    <HueScope domainKey={task.domain_key} className={'task-card' + (done ? ' done' : '')}>
+    <HueScope id={`task-${task.id}`} domainKey={task.domain_key} className={'task-card' + (done ? ' done' : '')}>
       <div className="row-flex" style={{ alignItems: 'flex-start', gap: 12 }}>
         <input type="checkbox" checked={done} onChange={toggleStatus}
           style={{ width: 17, height: 17, marginTop: 3, flexShrink: 0 }} />
@@ -362,6 +402,14 @@ function TaskCard({ task, onChanged, onTimer, onToast, groundingAvailable }) {
           </div>
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             {task.domain_key && <DomainBadge domainKey={task.domain_key} size="sm" />}
+            {task.due_date && <span className="badge"><Clock size={10} />due {task.due_date}</span>}
+            {task.scheduled_at && (
+              <span className="badge ok">
+                {new Date(task.scheduled_at).toLocaleString(undefined, {
+                  month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                })}
+              </span>
+            )}
             {task.time_minutes != null && <span className="badge"><Clock size={10} />{task.time_minutes}m</span>}
             {task.strategic_importance != null && (
               <span className="badge">importance {task.strategic_importance}</span>
@@ -473,6 +521,7 @@ function TaskCard({ task, onChanged, onTimer, onToast, groundingAvailable }) {
           )}
 
           <div className="row-flex" style={{ gap: 6 }}>
+            <button className="ghost sm" onClick={() => setEditing(true)}>Edit</button>
             {!done && <button className="ghost sm" onClick={defer}>Defer</button>}
             <button className="ghost sm danger-text" onClick={remove}><Trash2 size={12} />Delete</button>
           </div>
@@ -482,13 +531,128 @@ function TaskCard({ task, onChanged, onTimer, onToast, groundingAvailable }) {
   );
 }
 
+// ---- Task edit form --------------------------------------------------------
+/**
+ * Tasks were the one entity here you couldn't edit — Commitments and Projects
+ * both already have a form like this. `updateTask` already writes every field
+ * in `WRITABLE_TASK_FIELDS`; this was purely a missing UI.
+ */
+function TaskForm({ task, domains, projects, onCancel, onSaved, onError }) {
+  const [f, setF] = useState({
+    title: '', notes: '', domain_key: '', project_id: '',
+    due_date: '', scheduled_at: '', time_minutes: '', effort_remaining_minutes: '',
+    strategic_importance: 3, energy_required: 3, anxiety_level: 1,
+    income_impact: 0, restorative: 0, commitment_type: 'personal',
+    ...task,
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  async function save() {
+    setSaving(true);
+    try {
+      const body = { ...f };
+      if (!body.domain_key) delete body.domain_key;
+      if (!body.project_id) delete body.project_id;
+      if (!body.due_date) body.due_date = null;
+      if (!body.scheduled_at) body.scheduled_at = null;
+      for (const k of ['time_minutes', 'effort_remaining_minutes', 'strategic_importance',
+                       'energy_required', 'anxiety_level', 'income_impact', 'restorative']) {
+        body[k] = body[k] === '' || body[k] == null ? null : Number(body[k]);
+      }
+      await api.tasks.update(task.id, body);
+      onSaved();
+    } catch (err) { onError(err.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div>
+      <label>Title</label>
+      <input type="text" value={f.title} onChange={set('title')} />
+      <label>Notes</label>
+      <input type="text" value={f.notes || ''} onChange={set('notes')} placeholder="Optional" />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+        <div>
+          <label>Life domain</label>
+          <select value={f.domain_key || ''} onChange={set('domain_key')}>
+            <option value="">(none)</option>
+            {domains?.map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Project</label>
+          <select value={f.project_id || ''} onChange={set('project_id')}>
+            <option value="">(none)</option>
+            {projects?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Due date</label>
+          <input type="text" value={f.due_date || ''} onChange={set('due_date')} placeholder="2026-09-01" />
+        </div>
+        <div>
+          <label>Scheduled for</label>
+          <input type="datetime-local" value={f.scheduled_at || ''} onChange={set('scheduled_at')} />
+        </div>
+        <div>
+          <label>One sitting (minutes)</label>
+          <input type="number" min={5} step={5} value={f.time_minutes ?? ''} onChange={set('time_minutes')} />
+        </div>
+        <div>
+          <label>Work left, total (minutes)</label>
+          <input type="number" min={0} step={30} value={f.effort_remaining_minutes ?? ''}
+            onChange={set('effort_remaining_minutes')} placeholder="1080 = 3 working days" />
+        </div>
+        <div>
+          <label>Importance (1 highest – 5 lowest)</label>
+          <input type="number" min={1} max={5} value={f.strategic_importance ?? ''}
+            onChange={set('strategic_importance')} />
+        </div>
+        <div>
+          <label>Energy required (1–5)</label>
+          <input type="number" min={1} max={5} value={f.energy_required ?? ''} onChange={set('energy_required')} />
+        </div>
+        <div>
+          <label>Dread (1–5)</label>
+          <input type="number" min={1} max={5} value={f.anxiety_level ?? ''} onChange={set('anxiety_level')} />
+        </div>
+        <div>
+          <label>Income impact (0–5)</label>
+          <input type="number" min={0} max={5} value={f.income_impact ?? ''} onChange={set('income_impact')} />
+        </div>
+        <div>
+          <label>Restorative (0–5)</label>
+          <input type="number" min={0} max={5} value={f.restorative ?? ''} onChange={set('restorative')} />
+        </div>
+        <div>
+          <label>Kind</label>
+          <select value={f.commitment_type} onChange={set('commitment_type')}>
+            {['personal', 'contracted', 'speculative', 'restorative'].map((k) => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="row-flex" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+        <button className="ghost" onClick={onCancel}>Cancel</button>
+        <button onClick={save} disabled={saving || !f.title.trim()}>
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---- Cognitive load ------------------------------------------------------
 function CognitiveLoad({ stats }) {
   const { totals, by_domain } = stats;
   const maxMinutes = Math.max(1, ...by_domain.map((d) => d.open_minutes));
 
   return (
-    <div className="panel">
+    <div id="cognitive-load" className="panel">
       <h2><Compass size={15} />Cognitive load</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginBottom: 20 }}>
         <Metric label="Open" value={totals.open_count} />

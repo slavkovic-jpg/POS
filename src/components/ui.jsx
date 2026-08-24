@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { AlertTriangle } from 'lucide-react';
 import { domainMeta } from '../lib/domains.js';
 
 /**
@@ -32,6 +33,27 @@ export function HueScope({ domainKey, as: As = 'div', className = '', children, 
   const meta = domainMeta(domainKey);
   return (
     <As className={`hue-${meta.hue} ${className}`.trim()} {...rest}>{children}</As>
+  );
+}
+
+/**
+ * A live number on a nav link or a section tab — a count, an `x / y`
+ * fraction, or a plain warning glyph when there's nothing to count but
+ * something to flag (an incomplete scaffold, an unfinished onboarding).
+ *
+ * `tone` drives color and is the whole point: the same "3" reads as
+ * business-as-usual in neutral and as "look at this" in danger, without
+ * making the reader parse the number against context every time.
+ */
+export function NavBadge({ count, total, tone = 'neutral', warn = false }) {
+  if (warn) return <AlertTriangle size={11} className={`nav-badge tone-${tone}`} />;
+  if (count == null) return null;
+  if (total != null && count === 0 && total === 0) return null;
+  if (total == null && count === 0) return null;
+  return (
+    <span className={`nav-badge tone-${tone}`}>
+      {total != null ? `${count}/${total}` : count}
+    </span>
   );
 }
 

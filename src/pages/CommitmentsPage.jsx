@@ -5,6 +5,9 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { Callout, SectionHead } from '../components/ui.jsx';
+import SectionTabs from '../components/SectionTabs.jsx';
+import { useHashFlash } from '../lib/useHashFlash.js';
+import Timeline from '../components/Timeline.jsx';
 
 /**
  * Promises to other people — the layer the whole weighting engine hangs off.
@@ -33,6 +36,7 @@ export default function CommitmentsPage() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
+  const [loaded, setLoaded] = useState(false);
 
   async function refresh() {
     const [c, p, r] = await Promise.all([
@@ -42,7 +46,10 @@ export default function CommitmentsPage() {
     ]);
     setRows(c); setProjects(p); setRanking(r);
   }
-  useEffect(() => { refresh().catch((e) => setError(e.message)); }, []);
+  useEffect(() => {
+    refresh().catch((e) => setError(e.message)).finally(() => setLoaded(true));
+  }, []);
+  useHashFlash(loaded);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3000);
@@ -59,6 +66,8 @@ export default function CommitmentsPage() {
 
   const visible = rows.filter((r) =>
     showDelivered || !['delivered', 'dropped'].includes(r.status));
+  const openCount = rows.filter((r) => !['delivered', 'dropped'].includes(r.status)).length;
+  const atRiskCount = rows.filter((r) => r.status === 'at_risk').length;
 
   return (
     <div>
@@ -79,7 +88,15 @@ export default function CommitmentsPage() {
         </Callout>
       )}
 
-      <div className="panel">
+      <Timeline scope="commitments" />
+
+      <SectionTabs sections={[
+        { id: 'add', label: 'Add a commitment', icon: Plus },
+        { id: 'open', label: 'Open', icon: Handshake,
+          badge: openCount > 0 ? { count: openCount, tone: atRiskCount > 0 ? 'danger' : 'neutral' } : null },
+      ]} />
+
+      <div id="add" className="panel">
         <SectionHead icon={Plus} title="Add a commitment"
           action={<button className="ghost" onClick={() => setAdding((v) => !v)}>
             {adding ? 'Cancel' : 'New'}
@@ -96,7 +113,7 @@ export default function CommitmentsPage() {
             </p>}
       </div>
 
-      <div className="panel">
+      <div id="open" className="panel">
         <SectionHead icon={Handshake} title={`Open (${visible.length})`}
           action={<button className={'pill' + (showDelivered ? ' active' : '')}
             onClick={() => setShowDelivered((v) => !v)}>Show delivered</button>} />
@@ -236,7 +253,7 @@ function CommitmentRow({ c, risk, project, onChanged, onToast, onError }) {
   }
 
   return (
-    <div className="task-card" style={{
+    <div id={`commitment-${c.id}`} className="task-card" style={{
       opacity: done ? 0.5 : 1,
       borderLeftColor: risk?.level === 'red' ? 'var(--danger)'
         : risk ? 'var(--warn)' : 'var(--border)',

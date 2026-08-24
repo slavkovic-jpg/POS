@@ -61,55 +61,6 @@ export const BREAKDOWN_SCHEMA = {
   },
 };
 
-export const CAPTURE_SCHEMA = {
-  type: 'object',
-  properties: {
-    open_questions: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          question: { type: 'string' },
-          context: { type: 'string' },
-          importance: ONE_TO_FIVE,
-        },
-        required: ['question', 'context', 'importance'],
-      },
-    },
-    decisions: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          decision: { type: 'string' },
-          reasoning: { type: 'string' },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-        },
-        required: ['decision', 'reasoning', 'confidence'],
-      },
-    },
-    knowledge: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          category: {
-            type: 'string',
-            enum: ['identity', 'values', 'strengths', 'weaknesses', 'motivations',
-                   'energy', 'habits', 'preferences', 'stress_triggers',
-                   'decision_style', 'career', 'personal_life', 'learning',
-                   'finances', 'current_reality'],
-          },
-          content: { type: 'string' },
-          confidence: { type: 'number', minimum: 0, maximum: 1 },
-        },
-        required: ['category', 'content', 'confidence'],
-      },
-    },
-  },
-  required: ['open_questions', 'decisions', 'knowledge'],
-};
-
 /** Where a captured fragment belongs. `unclear` is a real answer, not a failure. */
 export const DESTINATIONS = [
   'task', 'commitment', 'project', 'idea', 'dependency',
@@ -330,3 +281,50 @@ export const REVIEW_SCHEMA = {
   required: ['achievements', 'failures', 'lessons', 'energy_notes',
              'burnout_indicators', 'next_period_recommendations'],
 };
+
+/** The six fixed stages of a morning briefing. Kept in sync with STAGES in server/briefing.mjs. */
+export const BRIEFING_STAGES = [
+  'urgencies_identified', 'energy_evaluated', 'constraints_understood',
+  'priorities_agreed', 'risks_considered', 'plan_accepted',
+];
+
+/**
+ * What the briefing conversation proposes after each exchange — never
+ * applied until the user accepts it (AGENTS.md #5, same gate as everything
+ * else that extracts structure from a conversation).
+ *
+ * `task_ref` follows the same reference discipline as ROUTE_SCHEMA's
+ * project_id/existing_id (AGENTS.md invariant 20): the prompt hands out short
+ * refs for today's actual tasks, never a raw id, and an enum is built per
+ * request from whatever is actually in play — same reason, same fix.
+ *
+ * No `description` on any property — AGENTS.md invariant 19. That is not
+ * decoration here either: it is what kept ROUTE_SCHEMA from breaking mid-item
+ * on a hosted provider.
+ */
+export function briefingPlanSchema(taskRefs = []) {
+  return {
+    type: 'object',
+    properties: {
+      stages: {
+        type: 'object',
+        properties: Object.fromEntries(BRIEFING_STAGES.map((s) => [s, { type: 'boolean' }])),
+        required: BRIEFING_STAGES,
+      },
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            time_label: { type: 'string' },
+            note: { type: 'string' },
+            ...(taskRefs.length ? { task_ref: { type: 'string', enum: [...taskRefs, 'none'] } } : {}),
+          },
+          required: ['title', 'time_label'],
+        },
+      },
+    },
+    required: ['stages', 'items'],
+  };
+}

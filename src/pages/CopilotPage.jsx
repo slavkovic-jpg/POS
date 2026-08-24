@@ -2,13 +2,19 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useSpeech } from '../lib/useSpeech.js';
 import { FolderInput } from 'lucide-react';
-import CaptureModal from '../components/CaptureModal.jsx';
 import RouteModal from '../components/RouteModal.jsx';
 
 /**
- * Voice-first conversation. Shares the chat_messages table with the Chat page
- * deliberately — one conversation thread, two input modalities. Anything you
- * say here is visible when you type there, and both feed Capture.
+ * The one conversation surface — voice or typed, advisor or intake or coach.
+ * Formerly split across Copilot and Chat, which shared the same
+ * `chat_messages` table and backend and differed only in whether voice was
+ * wired up. Chat added nothing Copilot didn't already do, so it was retired
+ * rather than kept as a second, thinner path to the same conversation.
+ *
+ * Layout is static-top, scrolling-transcript: the mode switch, mic, and input
+ * never move. Only `.chat-messages` scrolls, and it renders newest-first, so
+ * a new message needs no auto-scroll-to-bottom trick — it simply appears
+ * where you're already looking.
  */
 export default function CopilotPage() {
   const [messages, setMessages] = useState([]);
@@ -19,7 +25,6 @@ export default function CopilotPage() {
   );
   const [thinking, setThinking] = useState(false);
   const [typed, setTyped] = useState('');
-  const [captureOpen, setCaptureOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -35,12 +40,19 @@ export default function CopilotPage() {
   }, [toast]);
 
   useEffect(() => {
-    api.chat.messages().then(setMessages).catch(console.error);
+    api.chat.messages().then((msgs) => {
+      setMessages(msgs);
+      markSeen(Math.max(0, ...msgs.map((m) => Number(m.id) || 0)));
+    }).catch(console.error);
     api.config().then(setConfig).catch(console.error);
   }, []);
 
+  // Newest-first means the newest message is already at the top of the list.
+  // Only nudge the scroll position back to 0 if the reader was already there
+  // — someone scrolled down into history should not get yanked back up.
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (el && el.scrollTop < 40) el.scrollTop = 0;
   }, [messages, thinking]);
 
   // Declared before useSpeech so the callback can reference speech helpers via
@@ -60,6 +72,7 @@ export default function CopilotPage() {
         { id: `u-${Date.now()}`, role: 'user', content: clean },
         r.assistant,
       ]);
+      markSeen(r.assistant.id);
       if (spoken && voiceReplies) speechRef.current?.speak(r.assistant.content);
     } catch (err) {
       setToast(`Failed: ${err.message}`);
@@ -87,23 +100,22 @@ export default function CopilotPage() {
   }
 
   const slowBackend = config && !config.fast_backend_available;
+  const activeHint = config?.modes?.find((m) => m.key === mode)?.hint;
 
   return (
     <div className="chat">
-      <div className="page-header">
+      <div className="page-header" style={{ marginBottom: 10 }}>
         <h1>Copilot</h1>
-        <p>
-          Talk instead of typing. Same conversation as the Chat page — say it here, it's there.
-        </p>
+        <p>Talk or type — same conversation either way.</p>
       </div>
 
-      {/* Mode selector */}
-      <div className="panel" style={{ padding: 12, marginBottom: 12 }}>
-        <div className="segmented">
+      {/* Static: mode switch, mic/voice/File-this, and the input. Never scrolls. */}
+      <div className="copilot-topbar">
+        <div className="mode-switch">
           {(config?.modes || []).map((m) => (
             <button
               key={m.key}
-              className={'seg' + (mode === m.key ? ' active' : '')}
+              className={`mode-${m.key}` + (mode === m.key ? ' active' : '')}
               onClick={() => setMode(m.key)}
               title={m.hint}
             >
@@ -111,9 +123,54 @@ export default function CopilotPage() {
             </button>
           ))}
         </div>
-        <div className="item-meta" style={{ marginTop: 8 }}>
-          {config?.modes?.find((m) => m.key === mode)?.hint}
+
+        <div className="row-flex" style={{ gap: 8 }}>
+          <button
+            className={'mic' + (listening ? ' listening' : '') + (speaking ? ' speaking' : '')}
+            onClick={toggleMic}
+            disabled={!supported.stt}
+            title={listening ? 'Stop listening' : 'Start listening'}
+          >
+            {listening ? '■' : '●'}
+          </button>
+          {speaking && <button className="ghost" onClick={cancelSpeech}>Stop speaking</button>}
+          <button className="ghost" onClick={() => setVoiceReplies((v) => !v)} title="Read replies aloud">
+            {voiceReplies ? 'Voice on' : 'Voice off'}
+          </button>
+          <button className="ghost" onClick={() => setShowSettings((s) => !s)}>Voice…</button>
+          {/* The assistant has no tools and never will, so it can describe a
+              filing plan perfectly and do nothing with it. This is how what
+              was agreed actually reaches the tables — same review screen,
+              same nothing-writes-unconfirmed rule. */}
+          <button onClick={() => setRouteOpen(true)} disabled={messages.length === 0}>
+            <FolderInput size={13} />File this
+          </button>
         </div>
+      </div>
+      {activeHint && <div className="item-meta" style={{ marginTop: 2, marginBottom: 10 }}>{activeHint}</div>}
+
+      {interim && <div className="interim-preview">"{interim}"</div>}
+
+      <div className="chat-input">
+        <textarea
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              const t = typed; setTyped('');
+              send(t, { spoken: false });
+            }
+          }}
+          placeholder="…or type. Enter to send."
+          rows={2}
+        />
+        <button
+          onClick={() => { const t = typed; setTyped(''); send(t, { spoken: false }); }}
+          disabled={thinking || !typed.trim()}
+        >
+          Send
+        </button>
       </div>
 
       {slowBackend && (
@@ -147,73 +204,8 @@ export default function CopilotPage() {
         </div>
       )}
 
-      {/* Transcript */}
-      <div className="chat-messages" ref={scrollRef}>
-        {messages.length === 0 && (
-          <div className="empty">
-            Press the microphone and start talking. In Intake mode it mostly listens and asks what
-            else — good for emptying your head at the end of a day.
-          </div>
-        )}
-        {messages.map((m) => (
-          <div key={m.id} className={`chat-msg ${m.role}`}>
-            {m.content}
-          </div>
-        ))}
-        {interim && (
-          <div className="chat-msg user" style={{ opacity: 0.55, fontStyle: 'italic' }}>
-            {interim}
-          </div>
-        )}
-        {thinking && (
-          <div className="chat-msg assistant" style={{ color: 'var(--text-faint)' }}>
-            Thinking…
-          </div>
-        )}
-      </div>
-
-      {/* Voice controls */}
-      <div className="voice-bar">
-        <button
-          className={'mic' + (listening ? ' listening' : '') + (speaking ? ' speaking' : '')}
-          onClick={toggleMic}
-          disabled={!supported.stt}
-          title={listening ? 'Stop listening' : 'Start listening'}
-        >
-          {listening ? '■' : '●'}
-        </button>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>
-            {speaking ? 'Speaking…' : listening ? 'Listening — pause to send' : 'Microphone off'}
-          </div>
-          <div className="item-meta">
-            {listening
-              ? 'Stops automatically after a few seconds of silence.'
-              : supported.stt ? 'Press to talk. Nothing is recorded to disk.' : 'Type below instead.'}
-          </div>
-        </div>
-
-        {speaking && <button className="ghost" onClick={cancelSpeech}>Stop speaking</button>}
-        <button className="ghost" onClick={() => setVoiceReplies((v) => !v)}
-          title="Read replies aloud">
-          {voiceReplies ? 'Voice on' : 'Voice off'}
-        </button>
-        <button className="ghost" onClick={() => setShowSettings((s) => !s)}>Voice…</button>
-        <button className="ghost" onClick={() => setCaptureOpen(true)} disabled={messages.length === 0}>
-          Capture
-        </button>
-        {/* The assistant has no tools and never will, so it can describe a
-            filing plan perfectly and do nothing with it. This is how what was
-            agreed actually reaches the tables — same review screen, same
-            nothing-writes-unconfirmed rule. */}
-        <button onClick={() => setRouteOpen(true)} disabled={messages.length === 0}>
-          <FolderInput size={13} />File this
-        </button>
-      </div>
-
       {showSettings && (
-        <div className="panel" style={{ padding: 12, marginTop: 8 }}>
+        <div className="panel" style={{ padding: 12, marginBottom: 12 }}>
           <label>Voice</label>
           <select value={voiceURI} onChange={(e) => setVoiceURI(e.target.value)}>
             <option value="">System default</option>
@@ -229,34 +221,26 @@ export default function CopilotPage() {
         </div>
       )}
 
-      {/* Typing still available */}
-      <div className="chat-input">
-        <textarea
-          value={typed}
-          onChange={(e) => setTyped(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              const t = typed; setTyped('');
-              send(t, { spoken: false });
-            }
-          }}
-          placeholder="…or type. Enter to send."
-          rows={2}
-        />
-        <button
-          onClick={() => { const t = typed; setTyped(''); send(t, { spoken: false }); }}
-          disabled={thinking || !typed.trim()}
-        >
-          Send
-        </button>
+      {/* The only thing that scrolls. Newest first. */}
+      <div className="chat-messages" ref={scrollRef}>
+        {thinking && (
+          <div className="chat-msg assistant" style={{ color: 'var(--text-faint)' }}>
+            Thinking…
+          </div>
+        )}
+        {messages.length === 0 && !thinking && (
+          <div className="empty">
+            Press the microphone and start talking. In Intake mode it mostly listens and asks what
+            else — good for emptying your head at the end of a day.
+          </div>
+        )}
+        {[...messages].reverse().map((m) => (
+          <div key={m.id} className={`chat-msg ${m.role}`}>
+            {m.content}
+          </div>
+        ))}
       </div>
 
-      <CaptureModal
-        open={captureOpen}
-        onClose={() => setCaptureOpen(false)}
-        onSaved={(n) => setToast(`Saved ${n} item${n === 1 ? '' : 's'}.`)}
-      />
       <RouteModal
         open={routeOpen}
         source="conversation"
@@ -266,6 +250,13 @@ export default function CopilotPage() {
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
+}
+
+/** Advances the unread-replies cursor the sidebar reads — never backwards. */
+function markSeen(id) {
+  if (!id) return;
+  const current = Number(localStorage.getItem('pos_last_seen_message_id')) || 0;
+  if (id > current) localStorage.setItem('pos_last_seen_message_id', String(id));
 }
 
 /** Say where things actually went, not just how many. */

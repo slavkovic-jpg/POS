@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useHashFlash } from '../lib/useHashFlash.js';
 
 export default function OpenQuestionsPage() {
   const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [q, setQ] = useState('');
   const [importance, setImportance] = useState(3);
   const [reviewDate, setReviewDate] = useState('');
 
   async function refresh() { setItems(await api.questions.list()); }
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh().finally(() => setLoaded(true)); }, []);
+  useHashFlash(loaded);
 
   async function add() {
     if (!q.trim()) return;
@@ -57,7 +60,7 @@ export default function OpenQuestionsPage() {
         {items.length === 0 ? <div className="empty">Nothing open — nice.</div> : (
           <ul className="item-list">
             {items.map((it) => (
-              <li key={it.id}>
+              <li key={it.id} id={`question-${it.id}`}>
                 <div>
                   <div className="item-title">{it.question}</div>
                   <div className="item-meta">

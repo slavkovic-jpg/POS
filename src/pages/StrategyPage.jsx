@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Compass, Target, ListTodo, Check } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { domainMeta } from '../lib/domains.js';
 import { HueScope, SectionHead } from '../components/ui.jsx';
+import SectionTabs from '../components/SectionTabs.jsx';
 import ConfidenceBar from '../components/ConfidenceBar.jsx';
+import { useHashFlash } from '../lib/useHashFlash.js';
 
 /**
  * The strategy scaffold, and the destination for every domain badge in the
@@ -14,26 +16,16 @@ import ConfidenceBar from '../components/ConfidenceBar.jsx';
 export default function StrategyPage() {
   const [s, setS] = useState(null);
   const [stats, setStats] = useState(null);
+  const [navStatus, setNavStatus] = useState(null);
   const [saved, setSaved] = useState(null);
-  const { hash } = useLocation();
-  const highlightTimer = useRef(null);
 
   useEffect(() => {
     api.strategy.get().then(setS).catch(console.error);
     api.tasks.stats().then(setStats).catch(console.error);
+    api.navStatus().then(setNavStatus).catch(console.error);
   }, []);
 
-  // Scroll to and flash the domain someone arrived here to see.
-  useEffect(() => {
-    if (!s || !hash) return;
-    const el = document.getElementById(hash.slice(1));
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.classList.add('flash');
-    clearTimeout(highlightTimer.current);
-    highlightTimer.current = setTimeout(() => el.classList.remove('flash'), 1800);
-    return () => clearTimeout(highlightTimer.current);
-  }, [s, hash]);
+  useHashFlash(!!s);
 
   useEffect(() => {
     if (!saved) return;
@@ -43,14 +35,19 @@ export default function StrategyPage() {
 
   if (!s) return <div className="empty">Loading strategy…</div>;
 
-  async function save(patch) { setS(await api.strategy.update(patch)); setSaved('scaffold'); }
+  async function save(patch) {
+    setS(await api.strategy.update(patch)); setSaved('scaffold');
+    api.navStatus().then(setNavStatus).catch(console.error);
+  }
   async function saveDomain(key, patch) {
     const updated = await api.strategy.updateDomain(key, patch);
     setS((prev) => ({ ...prev, domains: prev.domains.map((d) => d.key === key ? updated : d) }));
     setSaved(key);
+    api.navStatus().then(setNavStatus).catch(console.error);
   }
 
   const openByDomain = new Map((stats?.by_domain || []).map((d) => [d.key, d]));
+  const missingDomainFields = s.domains.filter((d) => !d.current_state?.trim() || !d.desired_state?.trim()).length;
 
   return (
     <div>
@@ -63,7 +60,16 @@ export default function StrategyPage() {
         </p>
       </div>
 
-      <div className="panel hero">
+      <SectionTabs sections={[
+        { id: 'scaffold', label: 'Mission, identity, vision', icon: Target,
+          badge: navStatus && navStatus.strategy.filled < navStatus.strategy.total
+            ? { count: navStatus.strategy.filled, total: navStatus.strategy.total, tone: 'warn' }
+            : null },
+        { id: 'domains', label: 'Life domains', icon: Compass,
+          badge: missingDomainFields > 0 ? { count: missingDomainFields, tone: 'warn' } : null },
+      ]} />
+
+      <div id="scaffold" className="panel hero">
         <SectionHead icon={Target} title="Mission, identity, vision" />
         <label>Mission</label>
         <textarea defaultValue={s.mission} placeholder="What you're ultimately trying to do."
@@ -84,7 +90,7 @@ export default function StrategyPage() {
         )}
       </div>
 
-      <div className="panel">
+      <div id="domains" className="panel">
         <SectionHead icon={Compass} title="Life domains"
           action={<Link to="/tasks" className="item-meta">See these as tasks →</Link>} />
         <p style={{ color: 'var(--text-dim)', fontSize: 13, marginTop: 0 }}>

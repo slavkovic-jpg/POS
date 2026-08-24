@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useHashFlash } from '../lib/useHashFlash.js';
 
 export default function DecisionsPage() {
   const [items, setItems] = useState([]);
+  const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState({ decision: '', reasoning: '', expected_outcome: '', confidence: 0.6, followup_date: '' });
 
   async function refresh() { setItems(await api.decisions.list()); }
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh().finally(() => setLoaded(true)); }, []);
+  useHashFlash(loaded);
 
   async function add() {
     if (!form.decision.trim()) return;
@@ -57,7 +60,7 @@ export default function DecisionsPage() {
         {items.length === 0 ? <div className="empty">No decisions logged yet.</div> : (
           <ul className="item-list">
             {items.map((d) => (
-              <li key={d.id}>
+              <li key={d.id} id={`decision-${d.id}`}>
                 <div style={{ flex: 1 }}>
                   <div className="item-title">{d.decision}</div>
                   <div className="item-meta">
